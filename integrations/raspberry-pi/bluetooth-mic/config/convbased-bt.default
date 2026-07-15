@@ -1,0 +1,13 @@
+# Optional adapter name. Empty selects the first powered adapter, then the first present.
+# CONVBASED_HCI=hci1
+
+# New pairing is available for five minutes after the agent starts. Set 0 only on a
+# physically trusted network when permanent Just Works pairing is intentional.
+CONVBASED_PAIRING_WINDOW_SEC=300
+
+# auto applies the Broadcom SCO command only to a UART-attached Broadcom controller.
+# Other values: always, never.
+CONVBASED_SCO_ROUTE=auto
+
+# Ignore repeated hardware-error events during this recovery window.
+CONVBASED_BT_RECOVERY_COOLDOWN_SEC=60

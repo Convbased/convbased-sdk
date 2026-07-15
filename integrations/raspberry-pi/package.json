@@ -1,0 +1,21 @@
+{
+	"name": "convbased-raspberry-pi",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"description": "Reference Raspberry Pi integration for real-time voice conversion over ALSA, PipeWire, and Bluetooth HFP.",
+	"scripts": {
+		"start": "node index.mjs",
+		"check": "npm run check:syntax && npm test",
+		"check:syntax": "node scripts/check-js.mjs",
+		"test": "node --test test/*.test.mjs"
+	},
+	"dependencies": {
+		"@convbased/sdk": "*",
+		"@roamhq/wrtc": "^0.8.0",
+		"ws": "^8.18.0"
+	},
+	"engines": {
+		"node": ">=18"
+	}
+}

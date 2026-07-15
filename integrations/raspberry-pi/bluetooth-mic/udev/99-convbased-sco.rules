@@ -1,0 +1,4 @@
+# Ready whichever adapter appears. The service applies the Broadcom SCO command only
+# when the adapter is a UART-attached Broadcom controller.
+# Install to /etc/udev/rules.d/ then: sudo udevadm control --reload-rules
+ACTION=="add", SUBSYSTEM=="bluetooth", KERNEL=="hci[0-9]*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="convbased-scoroute@%k.service"

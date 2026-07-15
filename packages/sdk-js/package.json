@@ -1,0 +1,58 @@
+{
+	"name": "@convbased/sdk",
+	"version": "0.2.0",
+	"description": "Convbased real-time voice conversion SDK — connect to the signaling service with an API key and stream audio through WebRTC.",
+	"type": "module",
+	"main": "./dist/cjs/index.js",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./dist/cjs/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"src",
+		"README.md",
+		"LICENSE"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node scripts/emit-cjs-pkg.mjs && node scripts/bundle.mjs",
+		"build:bundle": "node scripts/bundle.mjs",
+		"typecheck": "tsc --noEmit",
+		"test": "npm run build && node --test test/*.test.mjs",
+		"clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+		"prepublishOnly": "npm run clean && npm run build",
+		"demo": "npm run build && node scripts/serve-demo.mjs",
+		"serve": "node scripts/serve-demo.mjs"
+	},
+	"keywords": [
+		"convbased",
+		"webrtc",
+		"voice-conversion",
+		"realtime",
+		"audio",
+		"sdk"
+	],
+	"author": "Convbased",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Convbased/convbased-sdk.git",
+		"directory": "packages/sdk-js"
+	},
+	"homepage": "https://github.com/Convbased/convbased-sdk/tree/main/packages/sdk-js#readme",
+	"bugs": "https://github.com/Convbased/convbased-sdk/issues",
+	"devDependencies": {
+		"typescript": "^5.9.3"
+	},
+	"engines": {
+		"node": ">=18"
+	}
+}

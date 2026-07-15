@@ -1,0 +1,19 @@
+{
+	"name": "convbased",
+	"private": true,
+	"version": "0.0.0",
+	"description": "Convbased browser SDK and verified Raspberry Pi integration.",
+	"workspaces": [
+		"packages/sdk-js",
+		"integrations/raspberry-pi"
+	],
+	"scripts": {
+		"build": "npm run build --workspace @convbased/sdk",
+		"typecheck": "npm run typecheck --workspace @convbased/sdk",
+		"test": "npm run test --workspace @convbased/sdk"
+	},
+	"license": "MIT",
+	"engines": {
+		"node": ">=18"
+	}
+}

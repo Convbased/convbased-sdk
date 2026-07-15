@@ -1,0 +1,23 @@
+# systemd --user unit: the Convbased voice-conversion app.
+# Captures the USB headset mic, runs it through the Convbased SDK, and plays the
+# converted track into the convbased_out null sink, which convbased-link carries into
+# the phone's HFP microphone during a call.
+#
+# setup.sh installs this and rewrites WorkingDirectory to wherever you cloned the repo
+# (and ExecStart to the detected `node`). Reads its config from convbased-app.env.
+# Install to ~/.config/systemd/user/ then: systemctl --user enable --now convbased-app
+[Unit]
+Description=Convbased voice-conversion app (mic -> SDK -> convbased_out)
+After=pipewire.service wireplumber.service convbased-link.service network-online.target
+Wants=pipewire.service wireplumber.service convbased-link.service
+
+[Service]
+EnvironmentFile=%h/convbased-bt/convbased-app.env
+WorkingDirectory=%h/convbased-sdk/integrations/raspberry-pi
+ExecStart=/usr/bin/node index.mjs
+Restart=on-failure
+RestartPreventExitStatus=78
+RestartSec=3
+
+[Install]
+WantedBy=default.target

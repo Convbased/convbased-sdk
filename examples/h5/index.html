@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Convbased SDK Demo</title>
+		<style>
+			:root {
+				color-scheme: light dark;
+				font-family:
+					ui-sans-serif,
+					system-ui,
+					-apple-system,
+					"Segoe UI",
+					Roboto,
+					"Helvetica Neue",
+					Arial,
+					sans-serif;
+			}
+			body {
+				margin: 0;
+				padding: 24px;
+				max-width: 720px;
+				margin-inline: auto;
+				display: grid;
+				gap: 16px;
+			}
+			h1 {
+				margin: 0 0 8px;
+				font-size: 1.4rem;
+			}
+			fieldset {
+				border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+				border-radius: 10px;
+				padding: 12px 16px;
+				display: grid;
+				gap: 8px;
+			}
+			label {
+				display: grid;
+				gap: 4px;
+				font-size: 0.85rem;
+			}
+			input,
+			select {
+				padding: 6px 8px;
+				border-radius: 6px;
+				border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+				background: transparent;
+				color: inherit;
+				font: inherit;
+			}
+			.row {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 8px;
+			}
+			button {
+				padding: 8px 14px;
+				border-radius: 8px;
+				border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+				background: color-mix(in srgb, canvas 92%, currentColor 8%);
+				color: inherit;
+				font: inherit;
+				cursor: pointer;
+			}
+			button:disabled {
+				opacity: 0.5;
+				cursor: not-allowed;
+			}
+			button.primary {
+				background: #2563eb;
+				color: white;
+				border-color: #2563eb;
+			}
+			button.danger {
+				background: #dc2626;
+				color: white;
+				border-color: #dc2626;
+			}
+			#status {
+				font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+				padding: 2px 8px;
+				border-radius: 6px;
+				background: color-mix(in srgb, canvas 90%, currentColor 10%);
+			}
+			#log {
+				font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+				font-size: 0.78rem;
+				height: 220px;
+				overflow: auto;
+				padding: 10px 12px;
+				border-radius: 8px;
+				border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+				white-space: pre-wrap;
+			}
+			.line.error {
+				color: #ef4444;
+			}
+			.line.warn {
+				color: #f59e0b;
+			}
+			.line.ok {
+				color: #10b981;
+			}
+			audio {
+				width: 100%;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>
+			Convbased SDK Demo
+			<small style="font-weight: normal; opacity: 0.7;">
+				· <span id="status">idle</span>
+			</small>
+		</h1>
+
+		<fieldset>
+			<legend>Connection parameters</legend>
+			<label>
+				API Key
+				<input
+					id="apiKey"
+					type="password"
+					autocomplete="off"
+					placeholder="cb_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+				/>
+				<small style="opacity:0.6;">
+					The service endpoint is predefined; provide an API key and model identifier.
+				</small>
+			</label>
+			<label>
+				Model ID
+				<input id="modelId" placeholder="model_xxx" />
+			</label>
+			<label style="max-width: 200px;">
+				Pitch
+				<input
+					id="pitch"
+					type="number"
+					step="1"
+					value="0"
+					min="-24"
+					max="24"
+				/>
+			</label>
+		</fieldset>
+
+		<div class="row">
+			<button id="connect" class="primary">Connect</button>
+			<button id="disconnect" class="danger" disabled>Disconnect</button>
+			<button id="mute" disabled>Mute</button>
+			<button id="apply" disabled>Apply pitch</button>
+		</div>
+
+		<fieldset>
+			<legend>Processed remote audio</legend>
+			<audio id="remote" autoplay playsinline controls></audio>
+		</fieldset>
+
+		<fieldset>
+			<legend>Event log</legend>
+			<div id="log"></div>
+		</fieldset>
+
+		<script src="https://cdn.weights.chat/sdk/convbased-sdk.global.js"></script>
+		<script>
+			// Loaded from cdn.weights.chat above; surfaces as window.Convbased.
+			if (!window.Convbased) {
+				const msg = document.createElement("div");
+				msg.style.cssText =
+					"padding:14px 16px;border-radius:8px;background:#fee2e2;color:#7f1d1d;border:1px solid #fca5a5;";
+				msg.innerHTML =
+					"<strong>SDK failed to load from cdn.weights.chat.</strong> " +
+					"Check the network tab; if the CDN is unreachable you can " +
+					"swap the &lt;script src&gt; URL to a local " +
+					"<code>packages/sdk-js/dist/convbased-sdk.global.js</code> built via <code>npm run build</code>.";
+				document.body.prepend(msg);
+				throw new Error("Convbased SDK failed to load");
+			}
+
+			const $ = (id) => document.getElementById(id);
+			const logEl = $("log");
+			const statusEl = $("status");
+			const remoteAudio = $("remote");
+
+			// `session` is the handle returned by startVoiceChange — all the WebRTC
+			// and signaling plumbing stays inside the SDK.
+			let session = null;
+			let muted = false;
+
+			const log = (line, kind = "") => {
+				const div = document.createElement("div");
+				div.className = `line ${kind}`;
+				const ts = new Date().toLocaleTimeString();
+				div.textContent = `[${ts}] ${line}`;
+				logEl.appendChild(div);
+				logEl.scrollTop = logEl.scrollHeight;
+			};
+
+			const setButtons = (status) => {
+				const busy = status === "connecting" || status === "live";
+				$("connect").disabled = busy;
+				$("disconnect").disabled = !busy;
+				$("mute").disabled = status !== "live";
+				$("apply").disabled = status !== "live";
+			};
+
+			const setStatus = (status) => {
+				statusEl.textContent = status;
+				setButtons(status);
+			};
+
+			$("connect").addEventListener("click", async () => {
+				const apiKey = $("apiKey").value.trim();
+				const modelId = $("modelId").value.trim();
+				const pitch = Number($("pitch").value);
+
+				if (!apiKey || !modelId) {
+					log("Both apiKey and modelId are required.", "error");
+					return;
+				}
+
+				setStatus("connecting");
+				try {
+					// One call: capture the mic, negotiate, and stream the converted
+					// voice into the <audio> element.
+					session = await Convbased.startVoiceChange({
+						apiKey,
+						modelId,
+						output: remoteAudio,
+						preferences: { pitch },
+						onStatus: (s) => {
+							setStatus(s);
+							log(`status: ${s}`, s === "live" ? "ok" : "");
+						},
+						onError: (err) => log(`error: ${err.message}`, "error"),
+					});
+					log("connected", "ok");
+				} catch (e) {
+					setStatus("idle");
+					log(`connect failed: ${e.message}`, "error");
+				}
+			});
+
+			$("disconnect").addEventListener("click", async () => {
+				if (!session) return;
+				await session.stop();
+				session = null;
+				muted = false;
+				$("mute").textContent = "Mute";
+				remoteAudio.srcObject = null;
+				setStatus("idle");
+			});
+
+			$("mute").addEventListener("click", () => {
+				if (!session) return;
+				muted = !muted;
+				session.setMuted(muted);
+				$("mute").textContent = muted ? "Unmute" : "Mute";
+				log(muted ? "muted" : "unmuted");
+			});
+
+			$("apply").addEventListener("click", () => {
+				if (!session) return;
+				const pitch = Number($("pitch").value);
+				session.setPitch(pitch);
+				log(`setPitch(${pitch})`);
+			});
+
+			log("Ready. Enter an API key and model ID, then select Connect.");
+		</script>
+	</body>
+</html>

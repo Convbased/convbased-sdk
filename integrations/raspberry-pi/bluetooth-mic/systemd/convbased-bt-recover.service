@@ -1,0 +1,16 @@
+# SYSTEM unit (needs root). Watches the kernel log for a BCM4345C0 "hardware error"
+# (the onboard controller can wedge under heavy SCO churn with an `hciN: hardware error`)
+# and recovers it WITHOUT a reboot by reloading the patchram firmware via a serdev
+# unbind/rebind. See scripts/bt-recover.sh.
+[Unit]
+Description=Convbased: auto-recover onboard Bluetooth (BCM4345C0) on hardware error
+After=bluetooth.service
+
+[Service]
+EnvironmentFile=-/etc/default/convbased-bt
+ExecStart=/usr/local/bin/convbased-bt-recover.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

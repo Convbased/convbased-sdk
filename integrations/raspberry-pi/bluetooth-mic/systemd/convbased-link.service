@@ -1,0 +1,17 @@
+# systemd --user unit. Install to ~/.config/systemd/user/ then:
+#   systemctl --user enable --now convbased-link.service
+#
+# For a bring-up tone test instead, run by hand:
+#   CONVBASED_TEST_TONE=/tmp/tone.wav /usr/bin/python3 ~/convbased-bt/linker.py
+[Unit]
+Description=Convbased HFP uplink linker (convbased_out.monitor -> bluez HFP uplink)
+After=pipewire.service wireplumber.service
+Wants=pipewire.service wireplumber.service
+
+[Service]
+ExecStart=/usr/bin/python3 %h/convbased-bt/linker.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

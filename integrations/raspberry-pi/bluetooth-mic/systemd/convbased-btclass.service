@@ -1,0 +1,18 @@
+[Unit]
+Description=Convbased: ready Bluetooth headset adapter
+After=bluetooth.service
+Requires=bluetooth.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/convbased-bt
+ExecStart=/usr/local/bin/convbased-bt-init.sh
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=75
+
+[Install]
+WantedBy=bluetooth.target

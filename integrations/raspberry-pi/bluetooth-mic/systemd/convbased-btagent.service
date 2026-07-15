@@ -1,0 +1,14 @@
+# systemd --user unit. Install to ~/.config/systemd/user/ then:
+#   systemctl --user enable --now convbased-btagent.service
+[Unit]
+Description=Convbased Bluetooth pairing agent (bounded Just Works window)
+After=bluetooth.target
+
+[Service]
+EnvironmentFile=-/etc/default/convbased-bt
+ExecStart=/usr/bin/python3 %h/convbased-bt/agent.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

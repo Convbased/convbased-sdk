@@ -1,0 +1,13 @@
+[Unit]
+Description=Convbased: ready Bluetooth adapter %I after add/reset
+After=bluetooth.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/convbased-bt
+ExecStart=/usr/local/bin/convbased-bt-init.sh %I
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=75
