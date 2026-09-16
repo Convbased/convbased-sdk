@@ -20,15 +20,15 @@ The Pi 4 and Android test matrix is in
 
 ## Install
 
-Run the idempotent setup as the service user:
+Run setup as the service user:
 
 ```bash
+git clone https://github.com/Convbased/convbased-sdk.git ~/convbased-sdk
 cd ~/convbased-sdk/integrations/raspberry-pi/bluetooth-mic
 ./setup.sh
 ```
 
-It installs dependencies, audio policy, systemd units, adapter recovery, and the
-pairing agent. It preserves `~/convbased-bt/convbased-app.env`.
+Setup preserves `~/convbased-bt/convbased-app.env`.
 
 Configure credentials and audio:
 
@@ -37,20 +37,11 @@ nano ~/convbased-bt/convbased-app.env
 chmod 600 ~/convbased-bt/convbased-app.env
 ```
 
-Set:
-
-```dotenv
-OUTPUT=pipewire
-PW_TARGET=convbased_out
-MIC_DEVICE=plughw:CARD=Device,DEV=0
-API_KEY=your_key
-MODEL_ID=your_model_if_no_server_profile_is_bound
-```
+Set `API_KEY`, select the USB headset in `MIC_DEVICE`, and set `MODEL_ID` if no server profile is bound. Other options are in [convbased-app.env.example](convbased-app.env.example).
 
 Keep real keys out of the repository, shell history, screenshots, and issue logs.
 
-The device's web-console **Realtime service** switch controls billing. Off disconnects
-conversion and leaves only profile polling; on reconnects within about 20 seconds.
+The web-console **Realtime service** switch controls billing. Keep profile polling enabled; see [Realtime billing switch](../README.md#realtime-billing-switch).
 
 ## Pair the phone
 
@@ -64,14 +55,7 @@ bluetoothctl show
 Select **Convbased Mic** and enable **Phone calls**. No PIN is required. The window
 closes automatically; paired devices remain trusted.
 
-For a wrong PIN or pairing-key error, forget **Convbased Mic** on the phone, remove
-the Pi bond, and pair again:
-
-```bash
-bluetoothctl devices
-bluetoothctl remove <PHONE_MAC>
-systemctl --user restart convbased-btagent.service
-```
+For pairing errors, see [pairing and reconnection](../docs/OPERATIONS.md#pairing-and-reconnection).
 
 ## Start the converter
 
@@ -103,46 +87,13 @@ convbased_out:monitor_MONO -> bluez_output.<MAC>:input_MONO
 SCO RX and TX counters should rise with zero errors. Confirm at the far end that only
 the converted voice is audible; routing data cannot prove audio content.
 
-## Headset volume
+## Operation
 
-`setup.sh` selects the USB headset. Start at 80% and adjust cautiously:
-
-```bash
-wpctl set-mute @DEFAULT_AUDIO_SINK@ 0
-wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.80
-wpctl get-volume @DEFAULT_AUDIO_SINK@
-```
-
-Avoid gain above 100% until clipping and hearing safety are checked.
-
-## Services
-
-| Unit | Scope | Responsibility |
-| --- | --- | --- |
-| `convbased-app` | user | USB mic -> SDK -> `convbased_out`. |
-| `convbased-btagent` | user | Bounded Just Works pairing and trust. |
-| `convbased-link` | user | Converted sink monitor -> transient HFP uplink. |
-| `convbased-btclass` | system | Adapter readiness, headset class, SCO-over-HCI. |
-| `convbased-scoroute@` | system | Reapply readiness after adapter appearance. |
-| `convbased-bt-recover` | system | Cooldown-limited controller recovery. |
-
-Inspect logs without printing the environment:
-
-```bash
-journalctl --user -u convbased-app.service -f
-journalctl --user -u convbased-btagent.service -f
-journalctl --user -u convbased-link.service -f
-sudo journalctl -u convbased-btclass.service -u convbased-bt-recover.service -f
-```
-
-Application logs redact signaling credentials.
+Service definitions are in [systemd/](systemd/). See Operations for [audio level](../docs/OPERATIONS.md#audio-level), [logs](../docs/OPERATIONS.md#logs), [service lifecycle](../docs/OPERATIONS.md#service-lifecycle) and [rollback](../docs/OPERATIONS.md#safe-rollback).
 
 ## Adapter policy
 
-Edit `/etc/default/convbased-bt`, then restart affected units. Empty
-`CONVBASED_HCI` selects an adapter automatically; `hci1` pins one. In `auto` mode,
-the SCO vendor route applies only to compatible UART Broadcom/Cypress controllers.
-Never set `CONVBASED_PAIRING_WINDOW_SEC=0` outside a controlled area.
+Edit `/etc/default/convbased-bt`, then restart affected units. Options are in [convbased-bt.default](config/convbased-bt.default). Never set `CONVBASED_PAIRING_WINDOW_SEC=0` outside a controlled area.
 
 ## Next references
 

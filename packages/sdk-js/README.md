@@ -102,7 +102,7 @@ Use `TtsClient.getModes()` to discover each mode's reference, transcript, contex
 
 ## Audio uploads
 
-Source and reference audio must be at most 100 MB and have a `mp3`, `wav`, `ogg`, `flac`, `m4a`, `aac` filename extension. Wrap an unnamed `Blob` in a `File` with an accepted filename, such as `new File([blob], "source.wav")`.
+Source and reference audio must be at most 100 MB and have a `mp3`, `wav`, `ogg`, `flac`, `m4a`, or `aac` filename extension. Unnamed blobs use `audio.wav`; wrap a blob in a `File` to supply its actual filename.
 
 ## Lower-level clients
 

@@ -22,24 +22,6 @@ For the phone case, read [`bluetooth-mic/README.md`](bluetooth-mic/README.md).
 The tested path is a Pi 4 with 64-bit Debian, PipeWire, WirePlumber, BlueZ, Node.js
 20, and a USB headset. See [`docs/VALIDATION.md`](docs/VALIDATION.md).
 
-## Quick start: Bluetooth phone case
-
-```bash
-git clone https://github.com/Convbased/convbased-sdk.git ~/convbased-sdk
-cd ~/convbased-sdk/integrations/raspberry-pi/bluetooth-mic
-./setup.sh
-
-nano ~/convbased-bt/convbased-app.env
-systemctl --user enable --now convbased-app.service
-```
-
-Set `API_KEY`, plus `MODEL_ID` if the device profile has no model. The mode-`0600`
-environment file lives outside the repository. The integration exchanges the key
-for short-lived SDK tokens; signaling uses one-time tickets.
-
-Pair **Convbased Mic**, enable **Phone calls**, and start a call. HFP ports exist only
-while call audio is active.
-
 ## Quick start: plain ALSA mode
 
 ```bash
@@ -57,48 +39,19 @@ npm start
 
 List devices with `arecord -l` and `aplay -l`. Prefer stable `CARD=` names.
 
-## Configuration
+Configuration: [convbased-app.env.example](bluetooth-mic/convbased-app.env.example).
 
-| Variable | Required | Default | Purpose |
-| --- | --- | --- | --- |
-| `API_KEY` | yes | none | Convbased API credential. |
-| `MODEL_ID` | conditional | server profile | Fallback model when no device profile is bound. |
-| `RATE` | no | `48000` | Capture and advertised sample rate. |
-| `MIC_DEVICE` | no | ALSA default | Capture device. |
-| `SPK_DEVICE` | no | ALSA default | Playback device for `OUTPUT=alsa`. |
-| `OUTPUT` | no | `alsa` | `alsa` or `pipewire`. |
-| `PW_TARGET` | no | `convbased_out` | PipeWire sink for converted audio. |
-| `PITCH` | no | `12` | Initial pitch; server profile or cache may override it. |
-| `PROFILE_POLL_MS` | no | `20000` | Device-profile refresh interval; `0` disables it. |
-| `WEBUI_PORT` | no | `8080` | Status panel port; `0` disables it. |
-| `WEBUI_HOST` | no | `0.0.0.0` | Bind address; use `127.0.0.1` for local-only access. |
-| `WEBUI_TOKEN` | no | empty | Optional token protecting mute and sidetone mutations. |
-| `SIGNALING_URL` | no | production | Self-hosted signaling override. |
-
-Template: [`bluetooth-mic/convbased-app.env.example`](bluetooth-mic/convbased-app.env.example).
+The integration exchanges `API_KEY` for short-lived SDK tokens; signaling uses one-time tickets. Keep the key in the mode-`0600` environment file outside the repository.
 
 ## Realtime billing switch
 
-The web console owns `realtime_enabled` for each device profile. Turning it off
-disconnects the billable session. The Pi then polls only the profile; it does not
-capture audio, fetch TURN credentials, or open signaling. Turning it on reconnects
-within `PROFILE_POLL_MS` (20 seconds by default).
+The web console owns `realtime_enabled` for each device profile. Turning it off disconnects the billable session. Turning it on reconnects at the next profile poll.
 
-Keep `PROFILE_POLL_MS` above zero when using the switch. A missing profile preserves
-legacy API-key behavior. New profiles start off; migrated profiles keep their prior
-running state until changed.
+Keep `PROFILE_POLL_MS` above zero when using the switch.
 
 ## Development and checks
 
-```bash
-npm run check --workspace convbased-raspberry-pi
-```
-
-```bash
-./integrations/raspberry-pi/bluetooth-mic/check.sh
-```
-
-The Linux check adds Bash syntax, Python bytecode, and optional ShellCheck.
+Run the [reproducible checks](docs/VALIDATION.md#reproducible-checks) from the repository root.
 
 Useful diagnostics:
 
@@ -110,7 +63,7 @@ node loopback.mjs         # real ALSA mic -> local WebRTC -> speaker
 ## Documentation
 
 - [Bluetooth appliance quick start](bluetooth-mic/README.md)
-- [Architecture and design decisions](docs/ARCHITECTURE.md)
+- [Architecture](docs/ARCHITECTURE.md)
 - [Operations and troubleshooting](docs/OPERATIONS.md)
 - [Validation matrix and evidence](docs/VALIDATION.md)
 - [Security](SECURITY.md)
