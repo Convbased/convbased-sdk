@@ -1,4 +1,4 @@
-// Text-to-speech client for the Convbased IndexTTS2 service. This path is pure
+// Text-to-speech client for the Convbased speech service. This path is pure
 // GraphQL — it does not touch WebRTC or the signaling socket. Synthesis is
 // asynchronous: you submit a job, then poll until it reaches a terminal state.
 //
@@ -18,8 +18,18 @@ import {
 	type SdkTokenRequest,
 } from "./auth.js";
 
-/** Optional emotion / sampling controls forwarded verbatim to IndexTTS2. */
-export interface TtsParams {
+/** Stable product modes. Execution providers remain private to the service. */
+export const TTS_GENERATION_MODES = [
+	"general",
+	"expressive",
+	"advanced",
+] as const;
+
+export type TtsGenerationMode = (typeof TTS_GENERATION_MODES)[number];
+export type TtsBillingUnit = "CHAR" | "SECOND";
+
+/** Expressive-mode emotion, sampling, and segmentation controls. */
+export interface ExpressiveTtsParams {
 	emo_alpha?: number;
 	emo_vector?: number[];
 	use_emo_text?: boolean;
@@ -27,7 +37,35 @@ export interface TtsParams {
 	temperature?: number;
 	top_p?: number;
 	top_k?: number;
+	max_text_tokens_per_segment?: number;
+	interval_silence?: number;
 }
+
+/** General-mode voice-design controls. */
+export interface GeneralTtsParams {
+	cfg_value?: number;
+	inference_timesteps?: number;
+	normalize?: boolean;
+	denoise?: boolean;
+}
+
+/** Advanced-mode direction and output controls. */
+export interface AdvancedTtsParams {
+	scene_description?: string;
+	format?: "wav" | "mp3" | "ogg_opus";
+	sample_rate?: 8000 | 16000 | 24000 | 32000 | 44100 | 48000;
+	speech_rate?: number;
+	loudness_rate?: number;
+	pitch_rate?: number;
+	enable_subtitle?: boolean;
+}
+
+/** Mode-specific controls validated by the service. */
+export type TtsParams =
+	| ExpressiveTtsParams
+	| GeneralTtsParams
+	| AdvancedTtsParams
+	| Record<string, unknown>;
 
 export type TtsJobStatus =
 	| "queued"
@@ -44,12 +82,20 @@ export interface TtsResult {
 	url: string | null;
 	/** Input-text token count the charge was based on. */
 	tokenCount: number;
+	/** Quantity actually billed in `billingUnit`. */
+	billingQuantity: number;
+	/** Unit used by `billingQuantity`. */
+	billingUnit: TtsBillingUnit;
+	/** Product mode that produced this result; null only for legacy jobs. */
+	mode: TtsGenerationMode | null;
 	/** Duration of the synthesized audio, in seconds. */
 	audioDurationSec: number;
 	/** Amount deducted from the wallet for this synthesis. */
 	amountCharged: number;
 	/** Wallet balance after the deduction. */
 	balanceAfter: number;
+	/** Word or sentence timing when subtitle generation is enabled. */
+	subtitle: unknown | null;
 }
 
 export interface TtsJob {
@@ -64,11 +110,29 @@ export interface TtsJob {
 }
 
 export interface TtsPricing {
-	/** Price charged per input-text token. */
+	/** Price charged per input character; the API keeps its legacy field name. */
 	pricePerToken: number;
+	/** Advanced-mode retail price charged per settled second. */
+	advancedPricePerSecond: number;
+	/** Maximum seconds used for the advanced-mode temporary reservation. */
+	advancedMaxSeconds: number;
 	/** Minimum charge applied to any single synthesis. */
 	minCharge: number;
 }
+
+export interface TtsModeInfo {
+	mode: TtsGenerationMode;
+	billingUnit: TtsBillingUnit;
+	/** Whether a reference transcript must be supplied as `promptText`. */
+	cloneRequiresTranscript: boolean;
+	/** Maximum ordered audio references accepted by this mode. */
+	maxReferences: number;
+	/** Whether the mode accepts prior audio as generation context. */
+	supportsContext: boolean;
+}
+
+/** A reference audio blob or an already-uploaded storage key. */
+export type TtsReference = Blob | { key: string };
 
 export interface TtsClientOptions {
 	auth: SdkAuthentication;
@@ -84,21 +148,37 @@ export interface TtsClientOptions {
 
 export interface SubmitTtsOptions {
 	/** COS key of an already-uploaded reference voice (see `uploadReferenceAudio`). */
-	referenceKey: string;
+	referenceKey?: string;
+	/** Ordered reference keys; advanced mode accepts up to `maxReferences`. */
+	referenceKeys?: readonly string[];
+	/** Optional key of a separate emotion reference in expressive mode. */
+	emotionReferenceKey?: string;
 	/** Text to synthesize. */
 	text: string;
-	/** Optional emotion / sampling controls. */
+	/** Stable product mode. Omit to use the service default. */
+	mode?: TtsGenerationMode;
+	/** Transcript of the reference voice when the selected mode requires it. */
+	promptText?: string;
+	/** Optional mode-specific controls. */
 	params?: TtsParams;
 }
 
 export interface SynthesizeOptions {
-	/** COS key of an already-uploaded reference voice. Provide this or `referenceAudio`. */
+	/** Ordered blobs or uploaded keys. Omit for reference-free general mode. */
+	references?: readonly TtsReference[];
+	/** Legacy single uploaded key alias. */
 	referenceKey?: string;
-	/** A reference-voice `Blob`/`File` to upload first. Provide this or `referenceKey`. */
+	/** Legacy single `Blob`/`File` alias. */
 	referenceAudio?: Blob;
+	/** Optional separate emotion reference in expressive mode. */
+	emotionReference?: TtsReference;
 	/** Text to synthesize. */
 	text: string;
-	/** Optional emotion / sampling controls. */
+	/** Stable product mode. Omit to use the service default. */
+	mode?: TtsGenerationMode;
+	/** Transcript of the reference voice when the selected mode requires it. */
+	promptText?: string;
+	/** Optional mode-specific controls. */
 	params?: TtsParams;
 	/** Poll interval while waiting for the job, in ms. Default 1500. */
 	pollIntervalMs?: number;
@@ -118,11 +198,23 @@ interface TtsJobWire {
 		key: string;
 		url: string | null;
 		token_count: number;
+		billing_quantity: number;
+		billing_unit: TtsBillingUnit;
+		mode: TtsGenerationMode | null;
 		audio_duration_sec: number;
 		amount_charged: number;
 		balance_after: number;
+		subtitle: unknown | null;
 	} | null;
 	error: string | null;
+}
+
+interface TtsModeInfoWire {
+	mode: TtsGenerationMode;
+	billing_unit: TtsBillingUnit;
+	clone_requires_transcript: boolean;
+	max_references: number;
+	supports_context: boolean;
 }
 
 const JOB_FIELDS = /* GraphQL */ `
@@ -133,9 +225,13 @@ const JOB_FIELDS = /* GraphQL */ `
 		key
 		url
 		token_count
+		billing_quantity
+		billing_unit
+		mode
 		audio_duration_sec
 		amount_charged
 		balance_after
+		subtitle
 	}
 	error
 `;
@@ -180,10 +276,15 @@ export class TtsClient {
 		});
 	}
 
-	/** Current billing rule: `cost = max(tokens * pricePerToken, minCharge)`. */
+	/** Current character- and second-based billing rules. */
 	async getPricing(signal?: AbortSignal): Promise<TtsPricing> {
 		const data = await graphqlRequest<{
-			ttsPricing: { price_per_token: number; min_charge: number };
+			ttsPricing: {
+				price_per_token: number;
+				advanced_price_per_second: number;
+				advanced_max_seconds: number;
+				min_charge: number;
+			};
 		}>({
 			graphqlUrl: this.graphqlUrl,
 			auth: this.auth,
@@ -193,6 +294,8 @@ export class TtsClient {
 				query {
 					ttsPricing {
 						price_per_token
+						advanced_price_per_second
+						advanced_max_seconds
 						min_charge
 					}
 				}
@@ -200,8 +303,33 @@ export class TtsClient {
 		});
 		return {
 			pricePerToken: data.ttsPricing.price_per_token,
+			advancedPricePerSecond:
+				data.ttsPricing.advanced_price_per_second,
+			advancedMaxSeconds: data.ttsPricing.advanced_max_seconds,
 			minCharge: data.ttsPricing.min_charge,
 		};
+	}
+
+	/** Stable product modes and their public capabilities. */
+	async getModes(signal?: AbortSignal): Promise<TtsModeInfo[]> {
+		const data = await graphqlRequest<{ ttsModes: TtsModeInfoWire[] }>({
+			graphqlUrl: this.graphqlUrl,
+			auth: this.auth,
+			tokenRequest: this.tokenRequest,
+			signal,
+			query: /* GraphQL */ `
+				query {
+					ttsModes {
+						mode
+						billing_unit
+						clone_requires_transcript
+						max_references
+						supports_context
+					}
+				}
+			`,
+		});
+		return data.ttsModes.map(toModeInfo);
 	}
 
 	/** Enqueue a synthesis job; resolves immediately with the queued job. */
@@ -220,8 +348,14 @@ export class TtsClient {
 			`,
 			variables: {
 				input: {
-					reference_key: opts.referenceKey,
+					reference_key: opts.referenceKey ?? null,
+					reference_keys: opts.referenceKeys
+						? [...opts.referenceKeys]
+						: null,
+					emo_reference_key: opts.emotionReferenceKey ?? null,
 					text: opts.text,
+					mode: opts.mode ?? null,
+					prompt_text: opts.promptText ?? null,
 					params: opts.params ?? null,
 				},
 			},
@@ -273,23 +407,35 @@ export class TtsClient {
 	 * rejects if the job fails/cancels, times out, or `signal` aborts.
 	 */
 	async synthesize(opts: SynthesizeOptions): Promise<TtsResult> {
-		if (!opts.referenceKey && !opts.referenceAudio) {
-			throw new Error(
-				"synthesize() requires either `referenceKey` or `referenceAudio`"
-			);
-		}
 		const pollIntervalMs = opts.pollIntervalMs ?? 1500;
 		const timeoutMs = opts.timeoutMs ?? 300_000;
 		const deadline = Date.now() + timeoutMs;
 
-		const referenceKey =
-			opts.referenceKey ??
-			(await this.uploadReferenceAudio(opts.referenceAudio!, {
-				signal: opts.signal,
-			})).key;
+		const references =
+			opts.references ??
+			(opts.referenceKey
+				? [{ key: opts.referenceKey }]
+				: opts.referenceAudio
+					? [opts.referenceAudio]
+					: []);
+		const referenceKeys = await Promise.all(
+			references.map((reference) =>
+				this.resolveReference(reference, opts.signal)
+			)
+		);
+		const emotionReferenceKey = opts.emotionReference
+			? await this.resolveReference(opts.emotionReference, opts.signal)
+			: undefined;
 
 		const submitted = await this.submit(
-			{ referenceKey, text: opts.text, params: opts.params },
+			{
+				referenceKeys: referenceKeys.length ? referenceKeys : undefined,
+				emotionReferenceKey,
+				text: opts.text,
+				mode: opts.mode,
+				promptText: opts.promptText,
+				params: opts.params,
+			},
 			opts.signal
 		);
 		opts.onJob?.(submitted);
@@ -329,6 +475,14 @@ export class TtsClient {
 		}
 		return job.result;
 	}
+
+	private async resolveReference(
+		reference: TtsReference,
+		signal?: AbortSignal
+	): Promise<string> {
+		if (!(reference instanceof Blob)) return reference.key;
+		return (await this.uploadReferenceAudio(reference, { signal })).key;
+	}
 }
 
 function toJob(wire: TtsJobWire): TtsJob {
@@ -341,12 +495,26 @@ function toJob(wire: TtsJobWire): TtsJob {
 					key: wire.result.key,
 					url: wire.result.url,
 					tokenCount: wire.result.token_count,
+					billingQuantity: wire.result.billing_quantity,
+					billingUnit: wire.result.billing_unit,
+					mode: wire.result.mode,
 					audioDurationSec: wire.result.audio_duration_sec,
 					amountCharged: wire.result.amount_charged,
 					balanceAfter: wire.result.balance_after,
+					subtitle: wire.result.subtitle,
 				}
 			: null,
 		error: wire.error,
+	};
+}
+
+function toModeInfo(wire: TtsModeInfoWire): TtsModeInfo {
+	return {
+		mode: wire.mode,
+		billingUnit: wire.billing_unit,
+		cloneRequiresTranscript: wire.clone_requires_transcript,
+		maxReferences: wire.max_references,
+		supportsContext: wire.supports_context,
 	};
 }
 

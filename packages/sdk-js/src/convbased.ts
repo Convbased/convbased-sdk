@@ -19,7 +19,13 @@ import type {
 	FileInferencePreferences,
 	RTCPreferences,
 } from "./types.js";
-import type { TtsJobStatus, TtsParams, TtsResult } from "./tts.js";
+import type {
+	TtsGenerationMode,
+	TtsJobStatus,
+	TtsParams,
+	TtsReference,
+	TtsResult,
+} from "./tts.js";
 import type { SdkAuthentication } from "./auth.js";
 
 /** Live tuning controls — pitch, RMS mix, formant, etc. (no transport fields). */
@@ -97,11 +103,19 @@ export interface ConvertedFile {
 
 export interface TextToSpeechOptions {
 	auth: SdkAuthentication;
-	/** The voice to clone: a reference `Blob`/`File`, or an uploaded `{ key }`. */
-	voice: Blob | { key: string };
+	/** A single reference. Omit for reference-free general mode. */
+	voice?: TtsReference;
+	/** Ordered references for modes that accept context. Do not combine with `voice`. */
+	voices?: readonly TtsReference[];
+	/** Optional separate emotion reference in expressive mode. */
+	emotionVoice?: TtsReference;
 	/** Text to synthesize. */
 	text: string;
-	/** Optional emotion / sampling controls. */
+	/** Stable product mode. Omit to use the service default. */
+	mode?: TtsGenerationMode;
+	/** Transcript of the reference voice when the selected mode requires it. */
+	promptText?: string;
+	/** Optional mode-specific controls. */
 	params?: TtsParams;
 	/** Called as the job advances through the queue. */
 	onProgress?: (status: TtsJobStatus, queuePosition: number) => void;
@@ -242,14 +256,16 @@ export async function convertFile(
 export async function textToSpeech(
 	opts: TextToSpeechOptions
 ): Promise<TtsResult> {
+	if (opts.voice && opts.voices) {
+		throw new Error("textToSpeech() accepts either `voice` or `voices`, not both");
+	}
 	const tts = new TtsClient({ auth: opts.auth });
-	const voiceRef =
-		opts.voice instanceof Blob
-			? { referenceAudio: opts.voice }
-			: { referenceKey: opts.voice.key };
 	return tts.synthesize({
-		...voiceRef,
+		references: opts.voices ?? (opts.voice ? [opts.voice] : undefined),
+		emotionReference: opts.emotionVoice,
 		text: opts.text,
+		mode: opts.mode,
+		promptText: opts.promptText,
 		params: opts.params,
 		timeoutMs: opts.timeoutMs,
 		signal: opts.signal,

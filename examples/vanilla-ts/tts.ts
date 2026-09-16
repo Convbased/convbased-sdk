@@ -27,13 +27,14 @@ export async function runTtsDemo(opts: TtsDemoOptions): Promise<void> {
 		auth: opts.auth,
 		voice: opts.referenceFile,
 		text: opts.text,
+		mode: "expressive",
 		params: { temperature: 0.8 },
 		onProgress: (status, queuePosition) =>
 			console.log(`[tts] ${status}`, queuePosition ? `queue #${queuePosition}` : ""),
 	});
 
 	console.log(
-		`[tts] done — ${result.tokenCount} tokens, ${result.audioDurationSec.toFixed(2)}s, ` +
+		`[tts] done — ${result.billingQuantity} ${result.billingUnit.toLowerCase()}, ${result.audioDurationSec.toFixed(2)}s, ` +
 			`charged ${result.amountCharged} (balance ${result.balanceAfter})`,
 	);
 

@@ -26,9 +26,17 @@ export {
 	type RunFileInferenceOptions,
 } from "./client.js";
 export {
+	TTS_GENERATION_MODES,
 	TtsClient,
 	type TtsClientOptions,
 	type TtsParams,
+	type ExpressiveTtsParams,
+	type GeneralTtsParams,
+	type AdvancedTtsParams,
+	type TtsGenerationMode,
+	type TtsBillingUnit,
+	type TtsModeInfo,
+	type TtsReference,
 	type TtsJob,
 	type TtsJobStatus,
 	type TtsResult,

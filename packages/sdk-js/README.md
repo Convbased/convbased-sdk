@@ -71,12 +71,15 @@ const result = await Convbased.textToSpeech({
 	auth,
 	voice: referenceFile, // File/Blob or an uploaded { key }.
 	text: "This is a synthesized speech sample.",
+	mode: "expressive", // "general" | "expressive" | "advanced"
 	params: { temperature: 0.8 },
 	onProgress: (status, queuePosition) => console.log(status, queuePosition),
 });
 
 document.querySelector<HTMLAudioElement>("#tts")!.src = result.url!;
 ```
+
+Use `TtsClient.getModes()` to discover each mode's reference, transcript, context, and billing requirements. Pass `voices` for ordered references, `promptText` for a reference transcript, or `emotionVoice` for a separate expressive-mode reference. Results include `billingQuantity`, `billingUnit`, and optional subtitle timing.
 
 ## Audio uploads
 
