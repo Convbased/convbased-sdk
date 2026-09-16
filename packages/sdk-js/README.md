@@ -1,150 +1,89 @@
 # @convbased/sdk
 
-Browser SDK for the Convbased voice services. Authenticate with an API key and
-reach three capabilities through one call each:
-
-- **Real-time voice change** — capture the microphone and stream the converted
-  voice back (`Convbased.startVoiceChange`).
-- **File conversion (voice-to-voice)** — convert a whole audio file and get a
-  download URL (`Convbased.convertFile`).
-- **Text-to-speech** — synthesize speech from text with a reference voice
-  (`Convbased.textToSpeech`).
-
-Each helper folds the fixed flow — open a session, wire the events, attach the
-audio, tear down — into a single call, so you never touch the WebRTC, signaling,
-or GraphQL machinery underneath.
-
-## Install
+Browser SDK for real-time voice conversion, file conversion, and text-to-speech.
 
 ```bash
-bun add @convbased/sdk
-# or
 npm install @convbased/sdk
 ```
 
-## Quick start — real-time voice change
+## Authentication
+
+Version 0.3 replaces `apiKey` with `auth`. Your backend issues short-lived SDK tokens bound to the requested client, scopes, and resource. Keep API keys on that backend; never embed them in browser code. The service must support signaling tickets; use 0.2 for legacy servers.
+
+Implement `/api/convbased/sdk-token` on your backend, authenticate the caller, and authorize the requested scopes and resource before issuing a token. The SDK caches tokens and calls `tokenProvider` when a refresh is needed.
 
 ```ts
-import { Convbased } from "@convbased/sdk";
+import { Convbased, type SdkAuthentication } from "@convbased/sdk";
 
+const auth: SdkAuthentication = {
+	clientId: "example.browser",
+	tokenProvider: async (request) => {
+		const response = await fetch("/api/convbased/sdk-token", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(request),
+		});
+		if (!response.ok) throw new Error("Token request failed");
+		return (await response.json()).access_token;
+	},
+};
+```
+
+For a non-refreshing session, use `auth: { clientId, sessionToken }` instead.
+
+## Real-time voice conversion
+
+```ts
 const session = await Convbased.startVoiceChange({
-	apiKey: "your_api_key",
+	auth,
 	modelId: "model_xxx",
-	output: document.querySelector("audio")!, // converted voice is wired + played for you
+	output: document.querySelector("audio")!,
 	preferences: { pitch: 0, rms_mix_rate: 0.25 },
 	onStatus: (status) => console.log(status), // "connecting" → "live" → "ended"
-	onError: (err) => console.error(err),
+	onError: (error) => console.error(error),
 });
 
-// Tune the voice live:
 session.setPitch(2);
 session.mute();
-
-// End the session and release the mic:
-await session.stop();
+await session.stop(); // Release the microphone and connection.
 ```
 
-`output` also accepts a callback if you want the raw `MediaStream`:
+`output` also accepts a callback receiving the converted `MediaStream`. Pass an existing stream as `input` to use preprocessed audio. Each session owns one connection; start a new session after stopping it. Browser media APIs are required.
 
-```ts
-await Convbased.startVoiceChange({
-	apiKey,
-	modelId,
-	output: (stream) => myAudioGraph.connect(stream),
-});
-```
-
-To feed a pre-processed input (noise suppression, pitch-shift workers…), pass an
-existing stream as `input`:
-
-```ts
-const raw = await navigator.mediaDevices.getUserMedia({ audio: true });
-await Convbased.startVoiceChange({ apiKey, modelId, input: await applyEffects(raw) });
-```
-
-## File conversion (voice-to-voice)
-
-Convert a whole audio file through the model. The SDK opens a session, runs the
-task, and tears it down — you get back a presigned download URL.
+## File conversion
 
 ```ts
 const { url } = await Convbased.convertFile({
-	apiKey,
+	auth,
 	modelId: "model_xxx",
-	file: fileInput.files[0], // a File/Blob
+	file: fileInput.files[0],
 	preferences: { pitch: 2, f0_method: "rmvpe" },
-	onProgress: (progress) => console.log(`${(progress * 100).toFixed(0)}%`),
+	onProgress: (progress) => console.log(progress),
 });
-console.log("converted audio:", url);
 ```
+
+The result contains a presigned download URL.
 
 ## Text-to-speech
 
-Clone a reference voice and synthesize speech from text.
-
 ```ts
 const result = await Convbased.textToSpeech({
-	apiKey,
-	voice: referenceFile, // a File/Blob, or `{ key }` for an already-uploaded voice
+	auth,
+	voice: referenceFile, // File/Blob or an uploaded { key }.
 	text: "This is a synthesized speech sample.",
 	params: { temperature: 0.8 },
 	onProgress: (status, queuePosition) => console.log(status, queuePosition),
 });
 
-const audio = document.querySelector<HTMLAudioElement>("#tts")!;
-audio.src = result.url!; // presigned, valid ~1h
+document.querySelector<HTMLAudioElement>("#tts")!.src = result.url!;
 ```
 
-> **Audio upload limits.** Reference / source audio is validated by **filename
-> extension** — one of `mp3`, `wav`, `ogg`, `flac`, `m4a`, `aac` — and a max
-> size of **100 MB**. When passing a bare `Blob` (no filename), name it
-> `source.wav` (or similar) so the extension check passes.
+## Audio uploads
 
-## CDN (no build step)
+Source and reference audio must be at most 100 MB and have a `mp3`, `wav`, `ogg`, `flac`, `m4a`, `aac` filename extension. Wrap an unnamed `Blob` in a `File` with an accepted filename, such as `new File([blob], "source.wav")`.
 
-A single-file build is hosted on the CDN and exposes everything on
-`window.Convbased`:
+## Lower-level clients
 
-```html
-<script src="https://cdn.weights.chat/sdk/convbased-sdk.global.js"></script>
-<script>
-	const session = await Convbased.startVoiceChange({ apiKey, modelId, output: audioEl });
-</script>
-```
+Use `ConvbasedClient` for session events and custom signaling endpoints, or `TtsClient` for the TTS job lifecycle. Both are exported from the package entry point. API types are in [src/convbased.ts](src/convbased.ts), [src/types.ts](src/types.ts), and [src/tts.ts](src/tts.ts).
 
-See `examples/h5/index.html` for a complete single-page demo, and
-`examples/vanilla-ts/` for framework-free TypeScript snippets of all three
-capabilities.
-
-## API surface
-
-```ts
-import { Convbased } from "@convbased/sdk";
-// or import the helpers directly:
-import { startVoiceChange, convertFile, textToSpeech } from "@convbased/sdk";
-```
-
-- `Convbased.startVoiceChange({ apiKey, modelId, output?, input?, preferences?, onStatus?, onError? })`
-  → `VoiceSession` — `{ stream, setPitch, update, mute, unmute, setMuted, stop }`
-- `Convbased.convertFile({ apiKey, modelId, file, preferences?, onProgress?, signal?, timeoutMs? })`
-  → `{ url, key? }`
-- `Convbased.textToSpeech({ apiKey, voice, text, params?, onProgress?, signal?, timeoutMs? })`
-  → `{ url, audioDurationSec, tokenCount, amountCharged, balanceAfter }`
-
-## Advanced — lower-level clients
-
-The façade is enough for normal use. Reach for `ConvbasedClient` / `TtsClient`
-only when you need the raw event stream or a self-hosted endpoint. These expose
-the full signaling protocol
-(`connect`, `updateConfig`, `startTask`/`stopTask`, the `track` / `taskAck` /
-`taskProgress` / `taskFinished` events, `getStats`, etc.) and the GraphQL TTS job
-lifecycle (`submit`, `getJob`, `cancel`, `getPricing`). They are exported from
-the same package entry point.
-
-## Notes
-
-- The SDK is **browser-only**. WebRTC in pure Node needs `wrtc` / `aiortc`,
-  which are out of scope here.
-- One session = one connection. Call `startVoiceChange` again for a new session.
-- The server rejects upfront if the wallet is empty, so a thrown error during
-  `startVoiceChange` may indicate insufficient balance — check `error.message`.
+See the [H5 example](https://github.com/Convbased/convbased-sdk/blob/main/examples/h5/index.html) and [TypeScript examples](https://github.com/Convbased/convbased-sdk/tree/main/examples/vanilla-ts/).

@@ -23,6 +23,7 @@ import { createMicStream, playTrack } from "./alsa.mjs";
 import { playTrackToPipewire } from "./pipewire.mjs";
 import { startWebUI, loadPrefs, savePrefs, loadModelId, clearModelOverride } from "./webui.mjs";
 import { fetchDeviceProfile } from "./device-profile.mjs";
+import { createSdkAuth } from "./sdk-auth.mjs";
 import {
 	isRealtimeEnabled,
 	waitForRealtimeEnabled,
@@ -106,6 +107,15 @@ if (!MODEL_ID) {
 	process.exit(EX_CONFIG);
 }
 
+const sdkAuth = createSdkAuth({
+	apiKey: API_KEY,
+	clientId: process.env.CLIENT_ID ?? "convbased-raspberry-pi",
+});
+const realtimeTokenRequest = sdkAuth.request(
+	["realtime"],
+	{ type: "vc_model", id: MODEL_ID },
+);
+
 const mic = createMicStream({
 	rate: RATE,
 	channels: 1,
@@ -123,7 +133,11 @@ const mic = createMicStream({
 // we fetch the credentials and rewrite the URLs, then hand the result to the
 // SDK (passing `iceServers` makes it skip its own GraphQL fetch).
 async function resolveWorkingIceServers() {
-	const cfg = await fetchRTCServers({ graphqlUrl: DEFAULT_GRAPHQL_URL, apiKey: API_KEY });
+	const cfg = await fetchRTCServers({
+		graphqlUrl: DEFAULT_GRAPHQL_URL,
+		auth: sdkAuth,
+		tokenRequest: realtimeTokenRequest,
+	});
 	const hosts = cfg.urls.map((u) => u.replace(/^turns?:/, "").replace(/:\d+.*$/, ""));
 	const urls = hosts.flatMap((h) => [
 		`turn:${h}:3478?transport=udp`,
@@ -147,7 +161,7 @@ try {
 console.log(`[ice] using ${iceServers[0].urls.length} rewritten turn: URLs (udp/tcp 3478)`);
 
 const client = new ConvbasedClient({
-	apiKey: API_KEY,
+	auth: sdkAuth,
 	iceServers,
 	...(SIGNALING_URL ? { signalingUrl: SIGNALING_URL } : {}),
 	// Surface the SDK's internal logging in the console.

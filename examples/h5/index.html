@@ -119,15 +119,15 @@
 		<fieldset>
 			<legend>Connection parameters</legend>
 			<label>
-				API Key
+				SDK session token
 				<input
-					id="apiKey"
+					id="sessionToken"
 					type="password"
 					autocomplete="off"
-					placeholder="cb_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+					placeholder="eyJ..."
 				/>
 				<small style="opacity:0.6;">
-					The service endpoint is predefined; provide an API key and model identifier.
+					Obtain a short-lived token from your integration backend.
 				</small>
 			</label>
 			<label>
@@ -213,12 +213,12 @@
 			};
 
 			$("connect").addEventListener("click", async () => {
-				const apiKey = $("apiKey").value.trim();
+				const sessionToken = $("sessionToken").value.trim();
 				const modelId = $("modelId").value.trim();
 				const pitch = Number($("pitch").value);
 
-				if (!apiKey || !modelId) {
-					log("Both apiKey and modelId are required.", "error");
+				if (!sessionToken || !modelId) {
+					log("Both session token and model ID are required.", "error");
 					return;
 				}
 
@@ -227,7 +227,10 @@
 					// One call: capture the mic, negotiate, and stream the converted
 					// voice into the <audio> element.
 					session = await Convbased.startVoiceChange({
-						apiKey,
+						auth: {
+							clientId: "convbased-h5-demo",
+							sessionToken,
+						},
 						modelId,
 						output: remoteAudio,
 						preferences: { pitch },
@@ -269,7 +272,7 @@
 				log(`setPitch(${pitch})`);
 			});
 
-			log("Ready. Enter an API key and model ID, then select Connect.");
+			log("Ready. Enter a short-lived SDK token and model ID, then select Connect.");
 		</script>
 	</body>
 </html>

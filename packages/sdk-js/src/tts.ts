@@ -3,7 +3,7 @@
 // asynchronous: you submit a job, then poll until it reaches a terminal state.
 //
 // Typical flow:
-//   const tts = new TtsClient({ apiKey });
+//   const tts = new TtsClient({ auth });
 //   const { key } = await tts.uploadReferenceAudio(file); // reference voice
 //   const result = await tts.synthesize({ referenceKey: key, text: "This is a synthesis test." });
 //   audio.src = result.url; // presigned, ~1h
@@ -11,6 +11,12 @@
 import { DEFAULT_GRAPHQL_URL } from "./endpoints.js";
 import { graphqlRequest } from "./graphql.js";
 import { uploadAudio } from "./upload.js";
+import {
+	SdkAuthSession,
+	sdkAuthSession,
+	type SdkAuthentication,
+	type SdkTokenRequest,
+} from "./auth.js";
 
 /** Optional emotion / sampling controls forwarded verbatim to IndexTTS2. */
 export interface TtsParams {
@@ -65,8 +71,7 @@ export interface TtsPricing {
 }
 
 export interface TtsClientOptions {
-	/** Scoped Convbased API key issued in the Web console. */
-	apiKey: string;
+	auth: SdkAuthentication;
 	/**
 	 * GraphQL endpoint. Defaults to the production Convbased endpoint
 	 * (`https://api.weights.chat/api/v1/graphql`). Override for self-hosted
@@ -137,14 +142,19 @@ const JOB_FIELDS = /* GraphQL */ `
 
 export class TtsClient {
 	private readonly graphqlUrl: string;
-	private readonly apiKey: string;
+	private readonly auth: SdkAuthSession;
+	private readonly tokenRequest: SdkTokenRequest;
 	private readonly logger: Pick<Console, "debug" | "info" | "warn" | "error">;
 
 	constructor(options: TtsClientOptions) {
-		const apiKey = options.apiKey?.trim();
-		if (!apiKey) throw new Error("TtsClient requires `apiKey`");
+		if (options && "apiKey" in options) {
+			throw new Error(
+				"`apiKey` was removed in @convbased/sdk 0.3.0; use `sessionToken` or `tokenProvider`"
+			);
+		}
 		this.graphqlUrl = options.graphqlUrl ?? DEFAULT_GRAPHQL_URL;
-		this.apiKey = apiKey;
+		this.auth = sdkAuthSession(options?.auth);
+		this.tokenRequest = this.auth.request(["tts"], { type: "tts" });
 		const provided = options.logger ?? {};
 		this.logger = {
 			debug: provided.debug ?? (() => {}),
@@ -161,7 +171,8 @@ export class TtsClient {
 	): Promise<{ key: string }> {
 		return uploadAudio({
 			graphqlUrl: this.graphqlUrl,
-			apiKey: this.apiKey,
+			auth: this.auth,
+			tokenRequest: this.tokenRequest,
 			file,
 			filename: opts?.filename,
 			contentType: opts?.contentType,
@@ -175,7 +186,8 @@ export class TtsClient {
 			ttsPricing: { price_per_token: number; min_charge: number };
 		}>({
 			graphqlUrl: this.graphqlUrl,
-			apiKey: this.apiKey,
+			auth: this.auth,
+			tokenRequest: this.tokenRequest,
 			signal,
 			query: /* GraphQL */ `
 				query {
@@ -196,7 +208,8 @@ export class TtsClient {
 	async submit(opts: SubmitTtsOptions, signal?: AbortSignal): Promise<TtsJob> {
 		const data = await graphqlRequest<{ submitTts: TtsJobWire }>({
 			graphqlUrl: this.graphqlUrl,
-			apiKey: this.apiKey,
+			auth: this.auth,
+			tokenRequest: this.tokenRequest,
 			signal,
 			query: /* GraphQL */ `
 				mutation SubmitTts($input: SynthesizeTtsInput!) {
@@ -220,7 +233,8 @@ export class TtsClient {
 	async getJob(jobId: string, signal?: AbortSignal): Promise<TtsJob> {
 		const data = await graphqlRequest<{ ttsJob: TtsJobWire }>({
 			graphqlUrl: this.graphqlUrl,
-			apiKey: this.apiKey,
+			auth: this.auth,
+			tokenRequest: this.tokenRequest,
 			signal,
 			query: /* GraphQL */ `
 				query TtsJob($jobId: String!) {
@@ -238,7 +252,8 @@ export class TtsClient {
 	async cancel(jobId: string, signal?: AbortSignal): Promise<TtsJob> {
 		const data = await graphqlRequest<{ cancelTtsJob: TtsJobWire }>({
 			graphqlUrl: this.graphqlUrl,
-			apiKey: this.apiKey,
+			auth: this.auth,
+			tokenRequest: this.tokenRequest,
 			signal,
 			query: /* GraphQL */ `
 				mutation CancelTtsJob($jobId: String!) {

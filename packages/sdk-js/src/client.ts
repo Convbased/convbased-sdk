@@ -3,10 +3,19 @@ import { DEFAULT_GRAPHQL_URL, DEFAULT_SIGNALING_URL } from "./endpoints.js";
 import { applyOpusSdpOptions } from "./sdp.js";
 import { SignalingChannel } from "./signaling.js";
 import {
+	SignalingTicketError,
+	issueSignalingTicket,
+} from "./signalingTicket.js";
+import {
 	DEFAULT_STUN_SERVERS,
 	fetchRTCServers,
 } from "./rtcServers.js";
 import { uploadAudio } from "./upload.js";
+import {
+	SdkAuthSession,
+	sdkAuthSession,
+	type SdkTokenRequest,
+} from "./auth.js";
 import {
 	type ConnectionState,
 	type ConnectionStats,
@@ -91,7 +100,7 @@ type ClientEvents = {
 /**
  * Real-time voice conversion client. Mirrors the flow used by Convbased-Web:
  *
- *  1. Open WebSocket to `${signalingUrl}/signaling/ws?api_key=…`.
+ *  1. Open the authenticated signaling WebSocket.
  *  2. Capture the microphone (or accept a user-provided `MediaStream`).
  *  3. Build an `RTCPeerConnection`, attach the mic track, mangle the offer's
  *     Opus parameters, and send `{type: "offer", sdp, preferences}` over the
@@ -108,7 +117,7 @@ type ClientEvents = {
 export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 	private readonly opts: Omit<
 		ConvbasedClientOptions,
-		"signalingUrl" | "graphqlUrl"
+		"signalingUrl" | "graphqlUrl" | "auth"
 	> & {
 		signalingUrl: string;
 		graphqlUrl: string | false;
@@ -118,6 +127,7 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 		signalingTimeoutMs: number;
 		connectTimeoutMs: number;
 	};
+	private readonly auth: SdkAuthSession;
 	private readonly logger: Required<NonNullable<ConvbasedClientOptions["logger"]>>;
 
 	private state: ConnectionState = "idle";
@@ -127,19 +137,24 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 	private convertedStream: MediaStream | null = null;
 	private serviceReadyTimer: ReturnType<typeof setTimeout> | null = null;
 	private offerInFlight = false;
+	private tokenRequest: SdkTokenRequest | null = null;
 
 	constructor(options: ConvbasedClientOptions) {
 		super();
-		const apiKey = options.apiKey?.trim();
-		if (!apiKey) throw new Error("ConvbasedClient requires `apiKey`");
+		if (options && "apiKey" in options) {
+			throw new Error(
+				"`apiKey` was removed in @convbased/sdk 0.3.0; use `sessionToken` or `tokenProvider`"
+			);
+		}
+		this.auth = sdkAuthSession(options?.auth);
+		const { auth: _auth, ...clientOptions } = options;
 		this.opts = {
 			iceTransportPolicy: "all",
 			bitrate: 64,
 			stereo: false,
 			signalingTimeoutMs: 120_000,
 			connectTimeoutMs: 20_000,
-			...options,
-			apiKey,
+			...clientOptions,
 			// Endpoints fall back to the baked-in Convbased production URLs.
 			signalingUrl: options.signalingUrl ?? DEFAULT_SIGNALING_URL,
 			graphqlUrl:
@@ -183,6 +198,12 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 		if (!opts.modelId) {
 			throw new Error("ConnectOptions.modelId is required");
 		}
+		this.tokenRequest = this.auth.request(
+			opts.enableFileInference
+				? ["realtime", "file_inference"]
+				: ["realtime"],
+			{ type: "vc_model", id: opts.modelId.trim() }
+		);
 
 		this.setState("signaling");
 		try {
@@ -233,9 +254,11 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 				"uploadAudio requires a GraphQL endpoint; do not set `graphqlUrl: false`"
 			);
 		}
+		const tokenRequest = this.requireTokenRequest("file_inference");
 		return uploadAudio({
 			graphqlUrl: this.opts.graphqlUrl,
-			apiKey: this.opts.apiKey,
+			auth: this.auth,
+			tokenRequest,
 			file,
 			filename: opts?.filename,
 			contentType: opts?.contentType,
@@ -261,6 +284,7 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 		if (!opts.audioKey) {
 			throw new Error("StartTaskOptions.audioKey is required");
 		}
+		this.requireTokenRequest("file_inference");
 		const taskId = opts.taskId ?? generateTaskId();
 		this.signaling.send({
 			type: "task_start",
@@ -278,6 +302,7 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 		if (!this.signaling?.isOpen) {
 			throw new Error("Cannot stopTask: signaling channel is closed");
 		}
+		this.requireTokenRequest("file_inference");
 		this.signaling.send({ type: "task_stop", task_id: taskId });
 	}
 
@@ -446,6 +471,7 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 			this.tearDownPeer();
 			this.signaling?.close();
 			this.signaling = null;
+			this.tokenRequest = null;
 			this.setState("closed");
 			this.emit("closed", {});
 		}
@@ -456,28 +482,76 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 	// ---------------------------------------------------------------------
 
 	private async openSignaling(): Promise<void> {
-		const channel = new SignalingChannel({
-			signalingUrl: this.opts.signalingUrl,
-			apiKey: this.opts.apiKey,
-			connectTimeoutMs: this.opts.connectTimeoutMs,
-			logger: this.logger,
-		});
-		await channel.connect({
-			onMessage: (msg) => this.handleSignalingMessage(msg),
-			onClose: (e) => this.handleSignalingClose(e),
-			onError: (e) =>
-				this.logger.warn?.("[convbased-sdk] signaling error event", e),
-		});
-		this.signaling = channel;
+		const tokenRequest = this.requireTokenRequest("realtime");
+		let lastError: unknown;
+		for (let attempt = 0; attempt < 2; attempt++) {
+			const ticket = await this.requestSignalingTicket(tokenRequest);
+			const channel = new SignalingChannel({
+				signalingUrl: this.opts.signalingUrl,
+				ticket,
+				connectTimeoutMs: this.opts.connectTimeoutMs,
+				logger: this.logger,
+			});
+			try {
+				await channel.connect({
+					onMessage: (msg) => this.handleSignalingMessage(msg),
+					onClose: (e) => this.handleSignalingClose(e),
+					onError: () =>
+						this.logger.warn?.(
+							"[convbased-sdk] signaling error event"
+						),
+				});
+				this.signaling = channel;
+				return;
+			} catch (error) {
+				lastError = error;
+				channel.close();
+			}
+		}
+		throw lastError instanceof Error
+			? lastError
+			: new Error("Signaling WebSocket failed to open");
+	}
+
+	private async requestSignalingTicket(
+		tokenRequest: SdkTokenRequest
+	): Promise<string> {
+		for (let attempt = 0; attempt < 2; attempt++) {
+			const controller = new AbortController();
+			const timeout = setTimeout(
+				() => controller.abort(),
+				this.opts.connectTimeoutMs
+			);
+			try {
+				return await issueSignalingTicket({
+					signalingUrl: this.opts.signalingUrl,
+					auth: this.auth,
+					tokenRequest,
+					signal: controller.signal,
+				});
+			} catch (error) {
+				const retryable =
+					error instanceof TypeError ||
+					(error instanceof SignalingTicketError && error.retryable) ||
+					(error instanceof Error && error.name === "AbortError");
+				if (attempt === 0 && retryable) continue;
+				throw error;
+			} finally {
+				clearTimeout(timeout);
+			}
+		}
+		throw new SignalingTicketError("SIGNALING_TICKET_FAILED");
 	}
 
 	private async resolveIceServers(): Promise<RTCServersConfig[]> {
 		if (this.opts.iceServers?.length) return this.opts.iceServers;
 		if (typeof this.opts.graphqlUrl === "string") {
 			try {
+				const tokenRequest = this.requireTokenRequest("realtime");
 				const cfg = await fetchRTCServers({
 					graphqlUrl: this.opts.graphqlUrl,
-					apiKey: this.opts.apiKey,
+					auth: this.auth,
+					tokenRequest,
 				});
 				if (cfg.urls?.length) return [cfg];
 			} catch (e) {
@@ -488,6 +562,15 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 			}
 		}
 		return DEFAULT_STUN_SERVERS;
+	}
+
+	private requireTokenRequest(scope: "realtime" | "file_inference") {
+		if (!this.tokenRequest?.scopes.includes(scope)) {
+			throw new Error(
+				`${scope} is not authorized for this client connection`
+			);
+		}
+		return this.tokenRequest;
 	}
 
 	private async openPeer(

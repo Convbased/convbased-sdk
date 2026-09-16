@@ -5,17 +5,17 @@
 //   import { runTtsDemo } from "./tts";
 //   document.getElementById("synth")!.addEventListener("click", () =>
 //     runTtsDemo({
-//       apiKey: import.meta.env.VITE_CONVBASED_API_KEY,
+//       auth,
 //       referenceFile: fileInput.files![0],
 //       text: textArea.value,
 //       audioEl: document.querySelector("audio")!,
 //     }),
 //   );
 
-import { Convbased } from "@convbased/sdk";
+import { Convbased, type SdkAuthOptions } from "@convbased/sdk";
 
 export interface TtsDemoOptions {
-	apiKey: string;
+	auth: SdkAuthOptions;
 	referenceFile: Blob; // the voice to clone
 	text: string;
 	audioEl: HTMLAudioElement;
@@ -24,7 +24,7 @@ export interface TtsDemoOptions {
 export async function runTtsDemo(opts: TtsDemoOptions): Promise<void> {
 	// One call: upload the reference voice, submit, and poll until done.
 	const result = await Convbased.textToSpeech({
-		apiKey: opts.apiKey,
+		auth: opts.auth,
 		voice: opts.referenceFile,
 		text: opts.text,
 		params: { temperature: 0.8 },

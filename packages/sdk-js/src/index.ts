@@ -44,6 +44,17 @@ export {
 	type HeaderKV,
 } from "./upload.js";
 export { graphqlRequest, type GraphQLAuth } from "./graphql.js";
+export {
+	SdkAuthError,
+	SdkAuthSession,
+	type SdkAuthErrorCode,
+	type SdkAuthentication,
+	type SdkAuthOptions,
+	type SdkResource,
+	type SdkScope,
+	type SdkTokenProvider,
+	type SdkTokenRequest,
+} from "./auth.js";
 export { applyOpusSdpOptions } from "./sdp.js";
 export {
 	fetchRTCServers,
@@ -53,6 +64,12 @@ export {
 	DEFAULT_SIGNALING_URL,
 	DEFAULT_GRAPHQL_URL,
 } from "./endpoints.js";
+export {
+	SignalingTicketError,
+	issueSignalingTicket,
+	signalingTicketUrl,
+	signalingWebSocketUrl,
+} from "./signalingTicket.js";
 export {
 	RTCStatusCode,
 	type ConnectOptions,

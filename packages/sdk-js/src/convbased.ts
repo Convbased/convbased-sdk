@@ -5,9 +5,9 @@
 // call per capability so consumers never touch the WebRTC / signaling / GraphQL
 // machinery underneath.
 //
-//   const session = await Convbased.startVoiceChange({ apiKey, modelId, output: audioEl });
-//   const file    = await Convbased.convertFile({ apiKey, modelId, file: blob });
-//   const speech  = await Convbased.textToSpeech({ apiKey, voice: blob, text });
+//   const session = await Convbased.startVoiceChange({ auth, modelId, output: audioEl });
+//   const file    = await Convbased.convertFile({ auth, modelId, file: blob });
+//   const speech  = await Convbased.textToSpeech({ auth, voice: blob, text });
 //
 // Reach for the underlying `ConvbasedClient` / `TtsClient` only when you need
 // the raw event stream or self-hosted endpoints.
@@ -20,6 +20,7 @@ import type {
 	RTCPreferences,
 } from "./types.js";
 import type { TtsJobStatus, TtsParams, TtsResult } from "./tts.js";
+import type { SdkAuthentication } from "./auth.js";
 
 /** Live tuning controls — pitch, RMS mix, formant, etc. (no transport fields). */
 export type VoicePreferences = Partial<
@@ -35,8 +36,7 @@ export type VoiceOutput =
 	| ((stream: MediaStream) => void);
 
 export interface StartVoiceChangeOptions {
-	/** Convbased API key issued in the Web console. */
-	apiKey: string;
+	auth: SdkAuthentication;
 	/** Model ID to load on the inference node. */
 	modelId: string;
 	/**
@@ -72,8 +72,7 @@ export interface VoiceSession {
 }
 
 export interface ConvertFileOptions {
-	/** Convbased API key issued in the Web console. */
-	apiKey: string;
+	auth: SdkAuthentication;
 	/** Model ID to load on the inference node. */
 	modelId: string;
 	/** The audio file/blob to convert end-to-end. */
@@ -97,8 +96,7 @@ export interface ConvertedFile {
 }
 
 export interface TextToSpeechOptions {
-	/** Convbased API key issued in the Web console. */
-	apiKey: string;
+	auth: SdkAuthentication;
 	/** The voice to clone: a reference `Blob`/`File`, or an uploaded `{ key }`. */
 	voice: Blob | { key: string };
 	/** Text to synthesize. */
@@ -149,7 +147,7 @@ function attachOutput(output: VoiceOutput, stream: MediaStream): void {
 export async function startVoiceChange(
 	opts: StartVoiceChangeOptions
 ): Promise<VoiceSession> {
-	const client = new ConvbasedClient({ apiKey: opts.apiKey });
+	const client = new ConvbasedClient({ auth: opts.auth });
 
 	let lastStatus: VoiceStatus | null = null;
 	client.on("state", ({ state }) => {
@@ -214,9 +212,12 @@ export async function startVoiceChange(
 export async function convertFile(
 	opts: ConvertFileOptions
 ): Promise<ConvertedFile> {
-	const client = new ConvbasedClient({ apiKey: opts.apiKey });
+	const client = new ConvbasedClient({ auth: opts.auth });
 	try {
-		await client.connect({ modelId: opts.modelId });
+		await client.connect({
+			modelId: opts.modelId,
+			enableFileInference: true,
+		});
 		const result = await client.runFileInference({
 			audio: opts.file,
 			preferences: opts.preferences,
@@ -241,7 +242,7 @@ export async function convertFile(
 export async function textToSpeech(
 	opts: TextToSpeechOptions
 ): Promise<TtsResult> {
-	const tts = new TtsClient({ apiKey: opts.apiKey });
+	const tts = new TtsClient({ auth: opts.auth });
 	const voiceRef =
 		opts.voice instanceof Blob
 			? { referenceAudio: opts.voice }

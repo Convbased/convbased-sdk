@@ -4,15 +4,15 @@
 //
 //   import { runFileInferenceDemo } from "./file-inference";
 //   runFileInferenceDemo({
-//     apiKey: import.meta.env.VITE_CONVBASED_API_KEY,
+//     auth,
 //     modelId: "model_xxx",
 //     sourceFile: fileInput.files![0],
 //   }).then((url) => console.log("converted:", url));
 
-import { Convbased } from "@convbased/sdk";
+import { Convbased, type SdkAuthOptions } from "@convbased/sdk";
 
 export interface FileInferenceDemoOptions {
-	apiKey: string;
+	auth: SdkAuthOptions;
 	modelId: string;
 	sourceFile: Blob; // the audio to convert
 }
@@ -21,7 +21,7 @@ export async function runFileInferenceDemo(
 	opts: FileInferenceDemoOptions,
 ): Promise<string> {
 	const { url } = await Convbased.convertFile({
-		apiKey: opts.apiKey,
+		auth: opts.auth,
 		modelId: opts.modelId,
 		file: opts.sourceFile,
 		preferences: { pitch: 0, f0_method: "rmvpe" },

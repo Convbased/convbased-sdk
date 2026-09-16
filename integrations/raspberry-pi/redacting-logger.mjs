@@ -1,4 +1,4 @@
-const SENSITIVE_QUERY_VALUE = /([?&](?:api_key|token)=)[^&\s]+/gi;
+const SENSITIVE_QUERY_VALUE = /([?&](?:api_key|token|ticket)=)[^&\s]+/gi;
 
 export function redactLogValue(value) {
 	return typeof value === "string"

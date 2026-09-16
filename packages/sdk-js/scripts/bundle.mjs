@@ -26,8 +26,10 @@ const order = [
 	"sdp.js",
 	"types.js",
 	"endpoints.js",
+	"auth.js",
 	"graphql.js",
 	"upload.js",
+	"signalingTicket.js",
 	"signaling.js",
 	"rtcServers.js",
 	"tts.js",
@@ -54,6 +56,12 @@ const globals = [
 	"DEFAULT_SIGNALING_URL",
 	"DEFAULT_GRAPHQL_URL",
 	"RTCStatusCode",
+	"SdkAuthError",
+	"SdkAuthSession",
+	"SignalingTicketError",
+	"issueSignalingTicket",
+	"signalingTicketUrl",
+	"signalingWebSocketUrl",
 ];
 
 // Strip every line that is purely an import / re-export. Convert
@@ -103,7 +111,7 @@ const banner = `/**
  *
  *   <script src="https://cdn.weights.chat/sdk/convbased-sdk.global.js"></script>
  *   <script>
- *     const client = new Convbased.ConvbasedClient({ apiKey });
+ *     const client = new Convbased.ConvbasedClient({ auth });
  *   </script>
  */`;
 
@@ -130,7 +138,7 @@ ${globalAssignments}
 \t};
 
 \t// Expose as window.Convbased so consumers can do:
-\t//   const client = new Convbased.ConvbasedClient({ apiKey });
+\t//   const client = new Convbased.ConvbasedClient({ auth });
 \tif (typeof globalThis.Convbased === "undefined") {
 \t\tglobalThis.Convbased = api;
 \t} else {

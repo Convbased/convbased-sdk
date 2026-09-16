@@ -1,3 +1,5 @@
+import type { SdkAuthentication } from "./auth.js";
+
 // Wire-protocol types mirrored from ServerAPI / signaling.
 
 export interface RTCServersConfig {
@@ -176,8 +178,7 @@ export type ConnectionState =
 	| "error";
 
 export interface ConvbasedClientOptions {
-	/** Scoped Convbased API key issued in the Web console. */
-	apiKey: string;
+	auth: SdkAuthentication;
 	/**
 	 * Signaling WebSocket URL. Defaults to the production Convbased endpoint
 	 * (`wss://api.weights.chat/api/signaling/ws`). Override only for
@@ -217,6 +218,8 @@ export interface ConnectOptions {
 	preferences?: Partial<Omit<RTCPreferences, "model_id" | "sample_rate">>;
 	/** Sample rate to advertise to the node. Defaults to the AudioContext's `sampleRate`, falling back to 48000. */
 	sampleRate?: number;
+	/** Authorize file inference on this connection in addition to real-time audio. */
+	enableFileInference?: boolean;
 }
 
 export interface ConnectionStats {

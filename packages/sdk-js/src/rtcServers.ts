@@ -3,7 +3,8 @@ import type { RTCServersConfig } from "./types.js";
 
 /**
  * Fetch TURN credentials from the Convbased GraphQL service. The query matches
- * the one used by Convbased-Web's `getRTCServers`.
+ * the one used by Convbased-Web's `getRTCServers`. Authentication uses the
+ * short-lived bearer token resolved by the SDK authentication session.
  */
 export async function fetchRTCServers(
 	args: GraphQLAuth & {
@@ -13,7 +14,8 @@ export async function fetchRTCServers(
 ): Promise<RTCServersConfig> {
 	const data = await graphqlRequest<{ rtcServers?: RTCServersConfig }>({
 		graphqlUrl: args.graphqlUrl,
-		apiKey: args.apiKey,
+		auth: args.auth,
+		tokenRequest: args.tokenRequest,
 		signal: args.signal,
 		query: /* GraphQL */ `
 			query {

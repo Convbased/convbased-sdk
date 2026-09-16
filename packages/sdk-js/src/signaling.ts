@@ -1,8 +1,9 @@
 import type { IncomingMessage, OutgoingMessage } from "./types.js";
+import { signalingWebSocketUrl } from "./signalingTicket.js";
 
 export interface SignalingChannelOptions {
 	signalingUrl: string;
-	apiKey: string;
+	ticket: string;
 	connectTimeoutMs: number;
 	logger: Pick<Console, "debug" | "info" | "warn" | "error">;
 }
@@ -14,9 +15,8 @@ export interface SignalingHandlers {
 }
 
 /**
- * Thin WebSocket wrapper for the Convbased signaling endpoint. Builds the URL
- * (`${base}/signaling/ws?api_key=…`), waits for `open`, and exposes JSON
- * send/recv. The signaling service owns protocol-level connection liveness.
+ * WebSocket transport using a one-time signaling ticket.
+ * The signaling service owns protocol-level connection liveness.
  */
 export class SignalingChannel {
 	private ws: WebSocket | null = null;
@@ -34,8 +34,11 @@ export class SignalingChannel {
 		}
 		this.handlers = handlers;
 
-		const url = this.buildUrl();
-		this.opts.logger.debug?.("[convbased-sdk] connecting signaling:", url);
+		const url = signalingWebSocketUrl(
+			this.opts.signalingUrl,
+			this.opts.ticket
+		);
+		this.opts.logger.debug?.("[convbased-sdk] connecting signaling");
 		const ws = new WebSocket(url);
 		this.ws = ws;
 
@@ -54,19 +57,15 @@ export class SignalingChannel {
 				cleanup();
 				resolve();
 			};
-			const onError = (e: Event) => {
+			const onError = () => {
 				cleanup();
-				reject(
-					new Error(
-						`Signaling WebSocket failed to open: ${describeEvent(e)}`
-					)
-				);
+				reject(new Error("Signaling WebSocket failed to open"));
 			};
 			const onClose = (e: CloseEvent) => {
 				cleanup();
 				reject(
 					new Error(
-						`Signaling WebSocket closed before open (code=${e.code}, reason=${e.reason || "?"})`
+						`Signaling WebSocket closed before open (code=${e.code})`
 					)
 				);
 			};
@@ -123,32 +122,4 @@ export class SignalingChannel {
 		this.handlers?.onClose(event);
 	}
 
-	private buildUrl(): string {
-		// `signalingUrl` may be:
-		//   - the full final URL ending in `/ws` (production default — used as-is)
-		//   - a bare host (e.g. `ws://localhost:3010`) — we append `/signaling/ws`
-		//   - something already containing `/signaling` — we append `/ws`
-		let base = this.opts.signalingUrl.trim();
-		if (base.endsWith("/")) base = base.slice(0, -1);
-
-		let finalUrl: string;
-		if (/\/ws$/i.test(base)) {
-			finalUrl = base;
-		} else if (/\/signaling$/i.test(base)) {
-			finalUrl = `${base}/ws`;
-		} else {
-			finalUrl = `${base}/signaling/ws`;
-		}
-
-		const apiKey = this.opts.apiKey?.trim();
-		if (!apiKey) throw new Error("SignalingChannel requires `apiKey`");
-		const url = new URL(finalUrl);
-		url.searchParams.set("api_key", apiKey);
-		return url.toString();
-	}
-}
-
-function describeEvent(e: Event): string {
-	if (e instanceof ErrorEvent && e.message) return e.message;
-	return e.type || "unknown error";
 }

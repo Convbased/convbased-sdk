@@ -58,7 +58,8 @@ export async function requestAudioUpload(
 ): Promise<PresignedUpload> {
 	const data = await graphqlRequest<{ requestAudioUpload: PresignedUpload }>({
 		graphqlUrl: args.graphqlUrl,
-		apiKey: args.apiKey,
+		auth: args.auth,
+		tokenRequest: args.tokenRequest,
 		signal: args.signal,
 		query: REQUEST_AUDIO_UPLOAD,
 		variables: {
@@ -118,7 +119,8 @@ export async function uploadAudio(
 
 	const presigned = await requestAudioUpload({
 		graphqlUrl: args.graphqlUrl,
-		apiKey: args.apiKey,
+		auth: args.auth,
+		tokenRequest: args.tokenRequest,
 		signal: args.signal,
 		filename,
 		contentType,

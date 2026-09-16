@@ -34,7 +34,8 @@ systemctl --user enable --now convbased-app.service
 ```
 
 Set `API_KEY`, plus `MODEL_ID` if the device profile has no model. The mode-`0600`
-environment file lives outside the repository.
+environment file lives outside the repository. The integration exchanges the key
+for short-lived SDK tokens; signaling uses one-time tickets.
 
 Pair **Convbased Mic**, enable **Phone calls**, and start a call. HFP ports exist only
 while call audio is active.

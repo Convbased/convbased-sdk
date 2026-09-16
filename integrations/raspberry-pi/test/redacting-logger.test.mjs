@@ -20,7 +20,7 @@ test("redacts every logger level", () => {
 	);
 	const logger = createRedactingLogger(sink);
 	for (const level of ["debug", "info", "warn", "error"]) {
-		logger[level](`https://example.test/?token=secret-${level}`, level);
+		logger[level](`https://example.test/?ticket=secret-${level}`, level);
 	}
 	assert.equal(records.length, 4);
 	assert.equal(records.some((record) => record.join(" ").includes("secret-")), false);

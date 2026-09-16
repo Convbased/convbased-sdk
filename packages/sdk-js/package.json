@@ -1,7 +1,7 @@
 {
 	"name": "@convbased/sdk",
-	"version": "0.2.0",
-	"description": "Convbased real-time voice conversion SDK — connect to the signaling service with an API key and stream audio through WebRTC.",
+	"version": "0.3.0",
+	"description": "Convbased browser SDK for short-lived, resource-bound voice capabilities.",
 	"type": "module",
 	"main": "./dist/cjs/index.js",
 	"module": "./dist/index.js",
