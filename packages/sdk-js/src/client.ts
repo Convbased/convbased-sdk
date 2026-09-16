@@ -11,6 +11,8 @@ import {
 	fetchRTCServers,
 } from "./rtcServers.js";
 import { uploadAudio } from "./upload.js";
+import { graphqlRequest } from "./graphql.js";
+import { SdkServiceError } from "./errors.js";
 import {
 	SdkAuthSession,
 	sdkAuthSession,
@@ -53,7 +55,15 @@ export interface TaskFinishedEvent {
 	downloadUrl?: string;
 	/** Server-reported error, on failure. */
 	error?: string;
-	code?: number;
+	code?: string | number;
+	meter?: string;
+	retryable?: boolean;
+	resetAt?: string | null;
+	executionStopped?: boolean;
+}
+
+export interface FileInferenceTask extends Omit<TaskFinishedEvent, "status"> {
+	status: TaskStatus | "accepted" | "unknown";
 }
 
 export interface StartTaskOptions {
@@ -138,6 +148,10 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 	private serviceReadyTimer: ReturnType<typeof setTimeout> | null = null;
 	private offerInFlight = false;
 	private tokenRequest: SdkTokenRequest | null = null;
+	private terminalError: Error | null = null;
+	private serviceReadyReceived = false;
+	private disconnecting: Promise<void> | null = null;
+	private closeEvent: ClientEvents["closed"] = {};
 
 	constructor(options: ConvbasedClientOptions) {
 		super();
@@ -208,14 +222,18 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 		this.setState("signaling");
 		try {
 			await this.openSignaling();
+			this.assertActive();
 			const iceServers = await this.resolveIceServers();
+			this.assertActive();
 			this.setState("negotiating");
 			await this.openPeer(opts, iceServers);
+			this.assertActive();
 			await this.waitForServiceReady();
+			this.assertActive();
 			this.setState("connected");
 		} catch (err) {
-			const error = err instanceof Error ? err : new Error(String(err));
-			this.emit("error", error);
+			const error = this.terminalError ?? (err instanceof Error ? err : new Error(String(err)));
+			if (!this.terminalError) this.emit("error", error);
 			await this.disconnect().catch(() => {});
 			this.setState("error");
 			throw error;
@@ -264,6 +282,25 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 			contentType: opts?.contentType,
 			signal: opts?.signal,
 		});
+	}
+
+	/** Read an existing file task, including after disconnect. Never dispatches work. */
+	async getFileInferenceTask(modelId: string, taskId: string, signal?: AbortSignal): Promise<FileInferenceTask | null> {
+		if (typeof this.opts.graphqlUrl !== "string")
+			throw new Error("getFileInferenceTask requires a GraphQL endpoint");
+		if (!modelId.trim() || !taskId.trim()) throw new Error("modelId and taskId are required");
+		const data = await graphqlRequest<{ fileInferenceTask: Record<string, unknown> | null }>({
+			graphqlUrl: this.opts.graphqlUrl,
+			auth: this.auth,
+			tokenRequest: this.auth.request(["file_inference"], { type: "vc_model", id: modelId.trim() }),
+			query: `query FileInferenceTask($modelId: String!, $taskId: String!) {
+				fileInferenceTask(model_id: $modelId, task_id: $taskId) {
+					task_id status execution_stopped result_key download_url error code retryable
+				}
+			}`,
+			variables: { modelId: modelId.trim(), taskId }, signal,
+		});
+		return data.fileInferenceTask === null ? null : fileTaskFromWire(data.fileInferenceTask);
 	}
 
 	/**
@@ -326,7 +363,7 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 		const timeoutMs = opts.timeoutMs ?? 300_000;
 
 		return new Promise<TaskFinishedEvent>((resolve, reject) => {
-			let taskId: string;
+			const taskId = opts.taskId ?? generateTaskId();
 			let timer: ReturnType<typeof setTimeout> | null = null;
 
 			const cleanup = () => {
@@ -364,15 +401,24 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 					resolve(e);
 				} else {
 					settleErr(
-						new Error(
-							e.error || `File inference task ${e.status}`
-						)
+						new SdkServiceError(e.error || `File inference task ${e.status}`, {
+							code: e.code ?? `TASK_${e.status.toUpperCase()}`,
+							task_id: taskId, meter: e.meter, retryable: e.retryable,
+							reset_at: e.resetAt, execution_stopped: e.executionStopped,
+						})
 					);
 				}
 			});
-			const offErr = this.on("error", (err) => settleErr(err));
+			const unknown = () => new SdkServiceError("File task result is unknown; query the original task", {
+				code: "TASK_EXECUTION_UNKNOWN", task_id: taskId, meter: "file_tasks", retryable: false,
+			});
+			const offErr = this.on("error", (err) => {
+				if (err instanceof SdkServiceError && err.taskId) {
+					if (err.taskId === taskId) settleErr(err);
+				} else settleErr(unknown());
+			});
 			const offClosed = this.on("closed", () =>
-				settleErr(new Error("Session closed before task finished"))
+				settleErr(unknown())
 			);
 
 			if (opts.signal?.aborted) {
@@ -387,17 +433,13 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 			opts.signal?.addEventListener("abort", onAbort, { once: true });
 
 			timer = setTimeout(() => {
-				settleErr(
-					new Error(
-						`Timed out waiting for file inference task after ${timeoutMs}ms`
-					)
-				);
+				settleErr(unknown());
 			}, timeoutMs);
 
 			try {
-				taskId = this.startTask({
+				this.startTask({
 					audioKey,
-					taskId: opts.taskId,
+					taskId,
 					generateName: opts.generateName,
 					format: opts.format,
 					preferences: opts.preferences,
@@ -452,7 +494,11 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 	}
 
 	/** Gracefully end the session — notifies the server, closes the PC. */
-	async disconnect(): Promise<void> {
+	disconnect(): Promise<void> {
+		return this.disconnecting ??= this.closeSession();
+	}
+
+	private async closeSession(): Promise<void> {
 		if (this.state === "closed" || this.state === "closing") return;
 		this.setState("closing");
 		this.clearServiceReadyTimer();
@@ -473,7 +519,7 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 			this.signaling = null;
 			this.tokenRequest = null;
 			this.setState("closed");
-			this.emit("closed", {});
+			this.emit("closed", this.closeEvent);
 		}
 	}
 
@@ -502,15 +548,22 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 						),
 				});
 				this.signaling = channel;
+				if (this.terminalError || this.state === "closed" || this.state === "closing") {
+					channel.close();
+					this.signaling = null;
+					this.assertActive();
+				}
 				return;
 			} catch (error) {
 				lastError = error;
 				channel.close();
+				if (this.terminalError) throw this.terminalError;
+				if (error instanceof SdkServiceError && error.retryable === false) throw error;
 			}
 		}
 		throw lastError instanceof Error
 			? lastError
-			: new Error("Signaling WebSocket failed to open");
+			: new SdkServiceError("Signaling WebSocket failed to open", { code: "NETWORK_ERROR", retryable: true });
 	}
 
 	private async requestSignalingTicket(
@@ -535,6 +588,13 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 					(error instanceof SignalingTicketError && error.retryable) ||
 					(error instanceof Error && error.name === "AbortError");
 				if (attempt === 0 && retryable) continue;
+				if (retryable && !(error instanceof SignalingTicketError)) {
+					throw new SdkServiceError("Signaling ticket request failed", {
+						code: error instanceof Error && error.name === "AbortError"
+							? "NETWORK_TIMEOUT" : "NETWORK_ERROR",
+						retryable: true,
+					});
+				}
 				throw error;
 			} finally {
 				clearTimeout(timeout);
@@ -555,6 +615,7 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 				});
 				if (cfg.urls?.length) return [cfg];
 			} catch (e) {
+				if (e instanceof SdkServiceError && e.retryable === false) throw e;
 				this.logger.warn?.(
 					"[convbased-sdk] fetchRTCServers failed, falling back to STUN:",
 					e
@@ -603,18 +664,22 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 				if (this.state === "negotiating") this.setState("connecting");
 			} else if (cs === "failed" || cs === "disconnected" || cs === "closed") {
 				if (this.state !== "closing" && this.state !== "closed") {
-					this.emit(
-						"error",
-						new Error(`PeerConnection entered "${cs}" state`)
-					);
-					void this.disconnect();
+					this.failSession(new SdkServiceError(`PeerConnection entered "${cs}" state`, {
+						code: "NETWORK_ERROR", retryable: true,
+					}));
 				}
 			}
 		};
 
-		this.localStream = await this.acquireLocalStream(opts.audio);
-		for (const track of this.localStream.getAudioTracks()) {
-			pc.addTrack(track, this.localStream);
+		const localStream = await this.acquireLocalStream(opts.audio);
+		this.localStream = localStream;
+		if (this.terminalError || this.state === "closing" || this.state === "closed") {
+			this.stopTracks(this.localStream);
+			this.localStream = null;
+			this.assertActive();
+		}
+		for (const track of localStream.getAudioTracks()) {
+			pc.addTrack(track, localStream);
 		}
 
 		const offer = await pc.createOffer({ offerToReceiveAudio: true });
@@ -623,10 +688,11 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 			stereo: this.opts.stereo,
 		});
 		await pc.setLocalDescription(offer);
+		this.assertActive();
 
 		const sampleRate =
 			opts.sampleRate ??
-			detectSampleRate(this.localStream) ??
+			detectSampleRate(localStream) ??
 			48000;
 
 		const preferences: RTCPreferences = {
@@ -662,6 +728,8 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 	}
 
 	private waitForServiceReady(): Promise<void> {
+		if (this.terminalError) return Promise.reject(this.terminalError);
+		if (this.serviceReadyReceived) return Promise.resolve();
 		return new Promise<void>((resolve, reject) => {
 			const off = this.on("ready", () => {
 				cleanup();
@@ -673,7 +741,7 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 			});
 			const offClosed = this.on("closed", () => {
 				cleanup();
-				reject(new Error("Signaling closed before SERVICE_READY"));
+				reject(this.terminalError ?? new SdkServiceError("Signaling closed before SERVICE_READY", { code: "SESSION_CLOSED" }));
 			});
 
 			this.serviceReadyTimer = setTimeout(() => {
@@ -702,9 +770,10 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 	}
 
 	private handleSignalingMessage(msg: IncomingMessage): void {
+		if (this.state === "closing" || this.state === "closed") return;
 		const type = (msg as { type?: string }).type;
 		this.emit("message", {
-			code: (msg as { code?: number }).code,
+			code: (msg as { code?: string | number }).code,
 			message: (msg as { message?: string }).message,
 			raw: msg,
 		});
@@ -751,29 +820,18 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 			}
 
 			case "task_finished": {
-				const m = msg as {
-					task_id: string;
-					status: TaskStatus;
-					result_key?: string;
-					download_url?: string;
-					error?: string;
-					code?: number;
-				};
-				this.emit("taskFinished", {
-					taskId: m.task_id,
-					status: m.status,
-					resultKey: m.result_key,
-					downloadUrl: m.download_url,
-					error: m.error,
-					code: m.code,
-				});
+				const task = fileTaskFromWire(msg as Record<string, unknown>);
+				if (task.status === "success" || task.status === "failure" || task.status === "cancelled")
+					this.emit("taskFinished", { ...task, status: task.status });
 				break;
 			}
 
+			case undefined:
 			case "message": {
 				const code = (msg as { code?: number }).code;
 				const text = (msg as { message?: string }).message;
 				if (code === RTCStatusCode.SERVICE_READY) {
+					this.serviceReadyReceived = true;
 					this.emit("ready", { code, message: text });
 				} else if (
 					code === RTCStatusCode.ERROR ||
@@ -783,12 +841,9 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 					code === RTCStatusCode.DUPLICATE_CONNECTION ||
 					code === RTCStatusCode.REQUEST_TOO_FAST
 				) {
-					this.emit(
-						"error",
-						new Error(text || `Server reported error code ${code}`)
-					);
+					this.failSession(new SdkServiceError(text || `Server reported error code ${code}`, msg));
 				} else if (code === RTCStatusCode.SHUTDOWN) {
-					void this.disconnect();
+					this.failSession(new SdkServiceError(text || "Server stopped the session", msg));
 				}
 				break;
 			}
@@ -796,11 +851,7 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 			case "shutdown":
 			case "error": {
 				const text = (msg as { message?: string }).message;
-				this.emit(
-					"error",
-					new Error(text || `Server sent "${type}"`)
-				);
-				void this.disconnect();
+				this.failSession(new SdkServiceError(text || `Server sent "${type}"`, msg));
 				break;
 			}
 
@@ -842,25 +893,24 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 
 	private handleSignalingClose(event: CloseEvent): void {
 		if (this.state === "closing" || this.state === "closed") return;
-		this.emit("closed", { code: event.code, reason: event.reason });
-		// 1008 is what the server sends for auth + balance failures.
-		if (event.code === 1008) {
-			this.emit(
-				"error",
-				new Error(
-					`Signaling rejected the connection: ${event.reason || "policy violation"}`
-				)
-			);
-		} else if (event.code !== 1000) {
-			this.emit(
-				"error",
-				new Error(
-					`Signaling closed unexpectedly (code=${event.code}, reason=${event.reason || "?"})`
-				)
-			);
-		}
-		this.tearDownPeer();
-		this.setState("closed");
+		this.closeEvent = { code: event.code, reason: event.reason };
+		this.failSession(new SdkServiceError(event.reason || "Signaling closed", {
+			code: event.code === 1008 ? "SIGNALING_POLICY_REJECTED" : "SESSION_CLOSED",
+			retryable: event.code !== 1000 && event.code !== 1008,
+		}));
+	}
+
+	private failSession(error: Error): void {
+		if (this.terminalError) return;
+		this.terminalError = error;
+		this.emit("error", error);
+		void this.disconnect();
+	}
+
+	private assertActive(): void {
+		if (this.terminalError) throw this.terminalError;
+		if (this.state === "closing" || this.state === "closed")
+			throw new SdkServiceError("Session closed", { code: "SESSION_CLOSED" });
 	}
 
 	private tearDownPeer(): void {
@@ -876,6 +926,7 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 			this.pc = null;
 		}
 		this.stopTracks(this.localStream);
+		this.stopTracks(this.convertedStream);
 		this.localStream = null;
 		this.convertedStream = null;
 	}
@@ -896,6 +947,22 @@ export class ConvbasedClient extends TypedEmitter<ClientEvents> {
 		this.state = next;
 		this.emit("state", { state: next, previous });
 	}
+}
+
+function fileTaskFromWire(wire: Record<string, unknown>): FileInferenceTask {
+	if (!wire || typeof wire.task_id !== "string" ||
+		!["accepted", "unknown", "success", "failure", "cancelled"].includes(String(wire.status)))
+		throw new SdkServiceError("Invalid file task response", { code: "INVALID_FILE_TASK_RESPONSE" });
+	const error = new SdkServiceError(typeof wire.error === "string" ? wire.error : "", wire);
+	return {
+		taskId: wire.task_id, status: wire.status as FileInferenceTask["status"],
+		resultKey: typeof wire.result_key === "string" ? wire.result_key : undefined,
+		downloadUrl: typeof wire.download_url === "string" ? wire.download_url : undefined,
+		error: error.message || undefined,
+		code: typeof wire.code === "string" || typeof wire.code === "number" ? wire.code : undefined,
+		meter: error.meter, retryable: error.retryable, resetAt: error.resetAt,
+		executionStopped: error.executionStopped,
+	};
 }
 
 function generateTaskId(): string {

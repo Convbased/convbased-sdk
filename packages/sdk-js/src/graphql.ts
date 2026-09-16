@@ -6,6 +6,7 @@ import {
 	type SdkAuthSession,
 	type SdkTokenRequest,
 } from "./auth.js";
+import { SdkServiceError } from "./errors.js";
 
 export interface GraphQLAuth {
 	auth: SdkAuthOptions | SdkAuthSession;
@@ -21,7 +22,7 @@ export interface GraphQLRequestArgs<V> extends GraphQLAuth {
 
 interface GraphQLErrorPayload {
 	message: string;
-	extensions?: { code?: unknown };
+	extensions?: Record<string, unknown>;
 }
 
 function retryableCredentialError(code: unknown): boolean {
@@ -50,7 +51,25 @@ export async function graphqlRequest<T, V = Record<string, unknown>>(
 			},
 			body: JSON.stringify({ query: args.query, variables: args.variables }),
 			signal: args.signal,
+		}).catch((error: unknown) => {
+			if (error instanceof TypeError)
+				throw new SdkServiceError("GraphQL network request failed", {
+					code: "NETWORK_ERROR", retryable: true,
+				});
+			throw error;
 		});
+		const json = await res.json().catch((error: unknown) => {
+			if (error instanceof Error && error.name === "AbortError") throw error;
+			return null;
+		}) as {
+			data?: T;
+			errors?: GraphQLErrorPayload[];
+		} | null;
+		const errors = Array.isArray(json?.errors) ? json.errors : [];
+		// A business refusal must not replay the operation via credential refresh.
+		const business = errors.find((error) => error.extensions?.code &&
+			!sdkAuthError(error.extensions.code));
+		if (business) throw new SdkServiceError(business.message, business.extensions);
 
 		if (!res.ok) {
 			if (res.status === 401 && auth.canRefresh && !refreshed) {
@@ -64,15 +83,13 @@ export async function graphqlRequest<T, V = Record<string, unknown>>(
 			if (res.status === 403) {
 				throw new SdkAuthError("AUTH_SCOPE_FORBIDDEN");
 			}
-			throw new Error(`GraphQL request failed: HTTP ${res.status}`);
+			throw new SdkServiceError(`GraphQL request failed: HTTP ${res.status}`, {
+				code: `HTTP_${res.status}`, retryable: res.status >= 500 || res.status === 429,
+			});
 		}
 
-		const json = (await res.json()) as {
-			data?: T;
-			errors?: GraphQLErrorPayload[];
-		};
-		if (json.errors?.length) {
-			const coded = json.errors.find((error) => error.extensions?.code);
+		if (errors.length) {
+			const coded = errors.find((error) => error.extensions?.code);
 			const code = coded?.extensions?.code;
 			if (
 				retryableCredentialError(code) &&
@@ -85,10 +102,10 @@ export async function graphqlRequest<T, V = Record<string, unknown>>(
 			}
 			const authFailure = sdkAuthError(code, coded?.message);
 			if (authFailure) throw authFailure;
-			throw new Error(json.errors.map((error) => error.message).join("; "));
+			throw new SdkServiceError(errors.map((error) => error.message).join("; "), coded?.extensions);
 		}
-		if (json.data === undefined || json.data === null) {
-			throw new Error("GraphQL response contained no data");
+		if (json?.data === undefined || json.data === null) {
+			throw new SdkServiceError("GraphQL response contained no data", { code: "INVALID_GRAPHQL_RESPONSE" });
 		}
 		return json.data;
 	}

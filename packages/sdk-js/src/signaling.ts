@@ -1,5 +1,6 @@
 import type { IncomingMessage, OutgoingMessage } from "./types.js";
 import { signalingWebSocketUrl } from "./signalingTicket.js";
+import { SdkServiceError } from "./errors.js";
 
 export interface SignalingChannelOptions {
 	signalingUrl: string;
@@ -50,7 +51,7 @@ export class SignalingChannel {
 				} catch {
 					/* ignore */
 				}
-				reject(new Error("Signaling WebSocket connect timeout"));
+				reject(new SdkServiceError("Signaling WebSocket connect timeout", { code: "NETWORK_TIMEOUT", retryable: true }));
 			}, this.opts.connectTimeoutMs);
 
 			const onOpen = () => {
@@ -59,13 +60,14 @@ export class SignalingChannel {
 			};
 			const onError = () => {
 				cleanup();
-				reject(new Error("Signaling WebSocket failed to open"));
+				reject(new SdkServiceError("Signaling WebSocket failed to open", { code: "NETWORK_ERROR", retryable: true }));
 			};
 			const onClose = (e: CloseEvent) => {
 				cleanup();
 				reject(
-					new Error(
-						`Signaling WebSocket closed before open (code=${e.code})`
+					new SdkServiceError(
+						`Signaling WebSocket closed before open (code=${e.code})`,
+						{ code: e.code === 1008 ? "SIGNALING_POLICY_REJECTED" : "NETWORK_ERROR", retryable: e.code !== 1008 }
 					)
 				);
 			};

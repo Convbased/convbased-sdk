@@ -22,6 +22,7 @@ export {
 	type TaskAckEvent,
 	type TaskProgressEvent,
 	type TaskFinishedEvent,
+	type FileInferenceTask,
 	type StartTaskOptions,
 	type RunFileInferenceOptions,
 } from "./client.js";
@@ -52,6 +53,7 @@ export {
 	type HeaderKV,
 } from "./upload.js";
 export { graphqlRequest, type GraphQLAuth } from "./graphql.js";
+export { SdkServiceError } from "./errors.js";
 export {
 	SdkAuthError,
 	SdkAuthSession,

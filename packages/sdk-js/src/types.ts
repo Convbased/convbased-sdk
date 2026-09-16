@@ -135,7 +135,10 @@ export type IncomingMessage =
 	| {
 			type: "message" | "shutdown" | "error";
 			message?: string;
-			code?: number;
+			code?: string | number;
+			meter?: string;
+			retryable?: boolean;
+			reset_at?: string | null;
 	  }
 	| { type: "answer"; sdp: string }
 	| { type: "ice_candidate"; candidate: RTCIceCandidateInit }
@@ -161,7 +164,11 @@ export type IncomingMessage =
 			result_key?: string;
 			download_url?: string;
 			error?: string;
-			code?: number;
+			code?: string | number;
+			meter?: string;
+			retryable?: boolean;
+			reset_at?: string | null;
+			execution_stopped?: boolean;
 	  }
 	| { type: "ping" }
 	| { type: "pong" }
@@ -229,7 +236,7 @@ export interface ConnectionStats {
 }
 
 export interface ServerMessageEvent {
-	code?: number;
+	code?: string | number;
 	message?: string;
 	raw: IncomingMessage;
 }

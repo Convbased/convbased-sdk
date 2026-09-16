@@ -52,10 +52,14 @@ await session.stop(); // Release the microphone and connection.
 
 ## File conversion
 
+Persist `taskId` and `modelId` before submitting so an interrupted request can be recovered.
+
 ```ts
+const taskId = crypto.randomUUID(); // Save this identity before submitting.
 const { url } = await Convbased.convertFile({
 	auth,
 	modelId: "model_xxx",
+	taskId,
 	file: fileInput.files[0],
 	preferences: { pitch: 2, f0_method: "rmvpe" },
 	onProgress: (progress) => console.log(progress),
@@ -63,6 +67,21 @@ const { url } = await Convbased.convertFile({
 ```
 
 The result contains a presigned download URL.
+
+### Errors and recovery
+
+Service refusals throw `SdkServiceError` with `code`, `meter`, `retryable`, `resetAt`, and, for file tasks, `taskId`. Authentication failures use `SdkAuthError`. A live refusal closes the connection and stops input/output tracks; a file-task refusal ends only that task's wait. The SDK does not reconnect or resubmit work after a refusal.
+
+A wait timeout or lost connection returns `TASK_EXECUTION_UNKNOWN` with the original task ID. Aborting requests a stop; only `executionStopped: true` confirms execution has ended. Query the original task with a provider authorized for the same model:
+
+```ts
+import { ConvbasedClient } from "@convbased/sdk";
+
+const client = new ConvbasedClient({ auth });
+const task = await client.getFileInferenceTask("model_xxx", taskId);
+```
+
+No live connection is needed. The result is `null` when no task is recorded, `accepted` or `unknown` while unresolved, or a terminal `success`, `failure`, or `cancelled` result. Querying does not dispatch work. Do not resubmit an unknown task; missing retry guidance is unspecified.
 
 ## Text-to-speech
 

@@ -4,17 +4,19 @@ import {
 	type SdkAuthSession,
 	type SdkTokenRequest,
 } from "./auth.js";
+import { SdkServiceError } from "./errors.js";
 
 const TICKET_PATTERN = /^st_[A-Za-z0-9_-]{43}$/;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
-export class SignalingTicketError extends Error {
+export class SignalingTicketError extends SdkServiceError {
 	constructor(
 		readonly code: string,
 		readonly retryable = false,
-		message = code
+		message = code,
+		details: Record<string, unknown> = {}
 	) {
-		super(message);
+		super(message, { ...details, code, retryable });
 		this.name = "SignalingTicketError";
 	}
 }
@@ -161,6 +163,7 @@ export async function issueSignalingTicket(args: {
 		const code = failure?.code;
 		if (
 			response.status === 401 &&
+			(!code || sdkAuthError(code)) &&
 			args.auth.canRefresh &&
 			!refreshed
 		) {
@@ -172,7 +175,9 @@ export async function issueSignalingTicket(args: {
 		if (authFailure) throw authFailure;
 		throw new SignalingTicketError(
 			typeof code === "string" ? code : `HTTP_${response.status}`,
-			failure?.retryable === true
+			failure?.retryable === true,
+			typeof failure?.message === "string" ? failure.message : undefined,
+			failure ?? {}
 		);
 	}
 }

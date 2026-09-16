@@ -83,6 +83,8 @@ export interface ConvertFileOptions {
 	modelId: string;
 	/** The audio file/blob to convert end-to-end. */
 	file: Blob;
+	/** Persist before submitting, to query the original result after a lost connection. */
+	taskId?: string;
 	/** Per-task conversion parameters (pitch, f0 method…). */
 	preferences?: FileInferencePreferences;
 	/** Called with conversion progress in `[0, 1]`. */
@@ -95,6 +97,7 @@ export interface ConvertFileOptions {
 
 /** The converted audio, as a presigned download URL. */
 export interface ConvertedFile {
+	taskId: string;
 	/** Presigned download URL of the converted audio. */
 	url: string;
 	/** Storage key of the converted audio. */
@@ -174,6 +177,7 @@ export async function startVoiceChange(
 	if (opts.output) {
 		const output = opts.output;
 		client.on("track", ({ stream }) => attachOutput(output, stream));
+		if (typeof output !== "function") client.on("closed", () => { output.srcObject = null; });
 	}
 
 	try {
@@ -234,6 +238,7 @@ export async function convertFile(
 		});
 		const result = await client.runFileInference({
 			audio: opts.file,
+			taskId: opts.taskId,
 			preferences: opts.preferences,
 			timeoutMs: opts.timeoutMs,
 			signal: opts.signal,
@@ -242,7 +247,7 @@ export async function convertFile(
 		if (!result.downloadUrl) {
 			throw new Error("Conversion finished but returned no download URL");
 		}
-		return { url: result.downloadUrl, key: result.resultKey };
+		return { taskId: result.taskId, url: result.downloadUrl, key: result.resultKey };
 	} finally {
 		await client.disconnect().catch(() => {});
 	}
