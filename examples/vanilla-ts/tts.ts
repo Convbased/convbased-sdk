@@ -7,6 +7,7 @@
 //     runTtsDemo({
 //       auth,
 //       referenceFile: fileInput.files![0],
+//       referenceTranscript: transcriptInput.value,
 //       text: textArea.value,
 //       audioEl: document.querySelector("audio")!,
 //     }),
@@ -17,6 +18,7 @@ import { Convbased, type SdkAuthOptions } from "@convbased/sdk";
 export interface TtsDemoOptions {
 	auth: SdkAuthOptions;
 	referenceFile: Blob; // the voice to clone
+	referenceTranscript: string; // what the reference voice says
 	text: string;
 	audioEl: HTMLAudioElement;
 }
@@ -26,9 +28,9 @@ export async function runTtsDemo(opts: TtsDemoOptions): Promise<void> {
 	const result = await Convbased.textToSpeech({
 		auth: opts.auth,
 		voice: opts.referenceFile,
+		promptText: opts.referenceTranscript,
 		text: opts.text,
-		mode: "expressive",
-		params: { temperature: 0.8 },
+		mode: "general",
 		onProgress: (status, queuePosition) =>
 			console.log(`[tts] ${status}`, queuePosition ? `queue #${queuePosition}` : ""),
 	});

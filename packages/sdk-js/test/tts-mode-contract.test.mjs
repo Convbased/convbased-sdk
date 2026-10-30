@@ -95,11 +95,7 @@ test("semantic modes expose public capabilities and pricing", async () => {
 		});
 	};
 	try {
-		assert.deepEqual(TTS_GENERATION_MODES, [
-			"general",
-			"expressive",
-			"advanced",
-		]);
+		assert.deepEqual(TTS_GENERATION_MODES, ["general", "advanced"]);
 		assert.deepEqual(await client().getModes(), [
 			{
 				mode: "general",
@@ -144,7 +140,6 @@ test("reference-free synthesis submits a semantic mode and maps billing", async 
 		assert.deepEqual(request.variables.input, {
 			reference_key: null,
 			reference_keys: null,
-			emo_reference_key: null,
 			text: "hello",
 			mode: "general",
 			prompt_text: null,
@@ -177,7 +172,6 @@ test("ordered references and mode-specific fields reach the GraphQL boundary", a
 	try {
 		const job = await client().submit({
 			referenceKeys: ["context/a.wav", "context/b.wav"],
-			emotionReferenceKey: "emotion/reference.wav",
 			text: "hello",
 			mode: "advanced",
 			promptText: "reference transcript",
@@ -186,7 +180,6 @@ test("ordered references and mode-specific fields reach the GraphQL boundary", a
 		assert.deepEqual(request.variables.input, {
 			reference_key: null,
 			reference_keys: ["context/a.wav", "context/b.wav"],
-			emo_reference_key: "emotion/reference.wav",
 			text: "hello",
 			mode: "advanced",
 			prompt_text: "reference transcript",

@@ -19,27 +19,10 @@ import {
 } from "./auth.js";
 
 /** Stable product modes. Execution providers remain private to the service. */
-export const TTS_GENERATION_MODES = [
-	"general",
-	"expressive",
-	"advanced",
-] as const;
+export const TTS_GENERATION_MODES = ["general", "advanced"] as const;
 
 export type TtsGenerationMode = (typeof TTS_GENERATION_MODES)[number];
 export type TtsBillingUnit = "CHAR" | "SECOND";
-
-/** Expressive-mode emotion, sampling, and segmentation controls. */
-export interface ExpressiveTtsParams {
-	emo_alpha?: number;
-	emo_vector?: number[];
-	use_emo_text?: boolean;
-	emo_text?: string;
-	temperature?: number;
-	top_p?: number;
-	top_k?: number;
-	max_text_tokens_per_segment?: number;
-	interval_silence?: number;
-}
 
 /** General-mode voice-design controls. */
 export interface GeneralTtsParams {
@@ -62,7 +45,6 @@ export interface AdvancedTtsParams {
 
 /** Mode-specific controls validated by the service. */
 export type TtsParams =
-	| ExpressiveTtsParams
 	| GeneralTtsParams
 	| AdvancedTtsParams
 	| Record<string, unknown>;
@@ -151,8 +133,6 @@ export interface SubmitTtsOptions {
 	referenceKey?: string;
 	/** Ordered reference keys; advanced mode accepts up to `maxReferences`. */
 	referenceKeys?: readonly string[];
-	/** Optional key of a separate emotion reference in expressive mode. */
-	emotionReferenceKey?: string;
 	/** Text to synthesize. */
 	text: string;
 	/** Stable product mode. Omit to use the service default. */
@@ -170,8 +150,6 @@ export interface SynthesizeOptions {
 	referenceKey?: string;
 	/** Legacy single `Blob`/`File` alias. */
 	referenceAudio?: Blob;
-	/** Optional separate emotion reference in expressive mode. */
-	emotionReference?: TtsReference;
 	/** Text to synthesize. */
 	text: string;
 	/** Stable product mode. Omit to use the service default. */
@@ -352,7 +330,6 @@ export class TtsClient {
 					reference_keys: opts.referenceKeys
 						? [...opts.referenceKeys]
 						: null,
-					emo_reference_key: opts.emotionReferenceKey ?? null,
 					text: opts.text,
 					mode: opts.mode ?? null,
 					prompt_text: opts.promptText ?? null,
@@ -423,14 +400,10 @@ export class TtsClient {
 				this.resolveReference(reference, opts.signal)
 			)
 		);
-		const emotionReferenceKey = opts.emotionReference
-			? await this.resolveReference(opts.emotionReference, opts.signal)
-			: undefined;
 
 		const submitted = await this.submit(
 			{
 				referenceKeys: referenceKeys.length ? referenceKeys : undefined,
-				emotionReferenceKey,
 				text: opts.text,
 				mode: opts.mode,
 				promptText: opts.promptText,

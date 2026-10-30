@@ -31,7 +31,6 @@ export {
 	TtsClient,
 	type TtsClientOptions,
 	type TtsParams,
-	type ExpressiveTtsParams,
 	type GeneralTtsParams,
 	type AdvancedTtsParams,
 	type TtsGenerationMode,

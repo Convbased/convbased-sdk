@@ -110,8 +110,6 @@ export interface TextToSpeechOptions {
 	voice?: TtsReference;
 	/** Ordered references for modes that accept context. Do not combine with `voice`. */
 	voices?: readonly TtsReference[];
-	/** Optional separate emotion reference in expressive mode. */
-	emotionVoice?: TtsReference;
 	/** Text to synthesize. */
 	text: string;
 	/** Stable product mode. Omit to use the service default. */
@@ -267,7 +265,6 @@ export async function textToSpeech(
 	const tts = new TtsClient({ auth: opts.auth });
 	return tts.synthesize({
 		references: opts.voices ?? (opts.voice ? [opts.voice] : undefined),
-		emotionReference: opts.emotionVoice,
 		text: opts.text,
 		mode: opts.mode,
 		promptText: opts.promptText,
