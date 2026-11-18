@@ -17,7 +17,7 @@ import { TtsClient } from "./tts.js";
 import type {
 	ConnectionState,
 	FileInferencePreferences,
-	RTCPreferences,
+	VoicePreferences,
 } from "./types.js";
 import type {
 	TtsGenerationMode,
@@ -28,10 +28,7 @@ import type {
 } from "./tts.js";
 import type { SdkAuthentication } from "./auth.js";
 
-/** Live tuning controls — pitch, RMS mix, formant, etc. (no transport fields). */
-export type VoicePreferences = Partial<
-	Omit<RTCPreferences, "model_id" | "sample_rate">
->;
+export type { VoicePreferences };
 
 /** Friendly session lifecycle, with the WebRTC negotiation states collapsed. */
 export type VoiceStatus = "connecting" | "live" | "ended";

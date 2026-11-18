@@ -8,9 +8,8 @@ export interface RTCServersConfig {
 	credential?: string;
 }
 
-export interface RTCPreferences {
-	model_id: string;
-	sample_rate: number;
+/** Live tuning controls — pitch, RMS mix, formant, etc. (no transport fields). */
+export interface VoicePreferences {
 	pitch?: number;
 	rms_mix_rate?: number;
 	f0_threshold?: number;
@@ -21,6 +20,14 @@ export interface RTCPreferences {
 	f0_autotune_strength?: number;
 	proposed_pitch?: boolean;
 	proposed_pitch_threshold?: number;
+	/** Adds `dynamic_f0_curve`'s offset at the input pitch to `pitch`. Realtime only. */
+	dynamic_f0?: boolean;
+	/**
+	 * `[input Hz, semitones]` points, 2 to 8, Hz rising within 50–1100, semitones within ±12;
+	 * the output pitch must not fall as the input rises. Linear in log pitch, held past the
+	 * end points. Defaults to `[[80, 1], [120, 0], [180, -2], [270, -5], [400, -9], [600, -12]]`.
+	 */
+	dynamic_f0_curve?: [number, number][];
 	enable_limiter?: boolean;
 	limiter_threshold?: number;
 	enable_lookahead?: boolean;
@@ -30,6 +37,11 @@ export interface RTCPreferences {
 	protect?: number;
 	threshold?: number;
 	[key: string]: unknown;
+}
+
+export interface RTCPreferences extends VoicePreferences {
+	model_id: string;
+	sample_rate: number;
 }
 
 export interface RealtimeProcessingLatencyStats {
@@ -222,7 +234,7 @@ export interface ConnectOptions {
 	/** Microphone constraints. Pass an existing `MediaStream` to skip getUserMedia entirely. */
 	audio?: MediaStream | MediaTrackConstraints | boolean;
 	/** Additional RVC preferences forwarded to the node. */
-	preferences?: Partial<Omit<RTCPreferences, "model_id" | "sample_rate">>;
+	preferences?: VoicePreferences;
 	/** Sample rate to advertise to the node. Defaults to the AudioContext's `sampleRate`, falling back to 48000. */
 	sampleRate?: number;
 	/** Authorize file inference on this connection in addition to real-time audio. */
